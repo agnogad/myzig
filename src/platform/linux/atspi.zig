@@ -51,6 +51,8 @@ pub const Error = error{
 const atspi_accessible = "org.a11y.atspi.Accessible";
 const atspi_component = "org.a11y.atspi.Component";
 const atspi_action = "org.a11y.atspi.Action";
+const atspi_text = "org.a11y.atspi.Text";
+const atspi_value = "org.a11y.atspi.Value";
 const atspi_event = "org.a11y.atspi.Event.Object";
 
 /// Where AT-SPI looks for the root object.
@@ -198,8 +200,39 @@ pub const Bridge = struct {
         if (std.mem.eql(u8, member, "GetParent")) {
             return self.replyReference(msg, target.parentPath());
         }
+        if (std.mem.eql(u8, member, "GetCharacterCount")) {
+            return self.replyI32(msg, @intCast(std.unicode.utf8CountCodepoints(target.node.value) catch target.node.value.len));
+        }
+        if (std.mem.eql(u8, member, "GetText")) {
+            const first = self.argI32(msg, 0) orelse return;
+            const last = self.argI32(msg, 1) orelse return;
+            const text = target.node.value;
+            const from: usize = if (first < 0) 0 else @min(@as(usize, @intCast(first)), text.len);
+            const to: usize = if (last < 0) text.len else @min(@as(usize, @intCast(last)), text.len);
+            if (from >= to) return self.replyString(msg, "");
+            return self.replyString(msg, text[from..to]);
+        }
+        if (std.mem.eql(u8, member, "GetCurrentValue")) {
+            const n = target.node.numeric orelse return self.replyDouble(msg, 0);
+            return self.replyDouble(msg, n.value);
+        }
+        if (std.mem.eql(u8, member, "GetMinimumValue")) {
+            const n = target.node.numeric orelse return self.replyDouble(msg, 0);
+            return self.replyDouble(msg, n.min);
+        }
+        if (std.mem.eql(u8, member, "GetMaximumValue")) {
+            const n = target.node.numeric orelse return self.replyDouble(msg, 0);
+            return self.replyDouble(msg, n.max);
+        }
+        if (std.mem.eql(u8, member, "GetMinimumIncrement")) {
+            const n = target.node.numeric orelse return self.replyDouble(msg, 0);
+            return self.replyDouble(msg, n.step);
+        }
+        if (std.mem.eql(u8, member, "GetValueText")) {
+            return self.replyString(msg, target.node.value);
+        }
         if (std.mem.eql(u8, member, "GetInterfaces")) {
-            return self.replyInterfaces(msg);
+            return self.replyInterfaces(msg, target.node);
         }
         if (std.mem.eql(u8, member, "GetActions")) {
             return self.replyActions(msg, target.node);
@@ -509,18 +542,79 @@ pub const Bridge = struct {
         self.send(reply);
     }
 
-    fn replyInterfaces(self: *Bridge, msg: *dbus.DBusMessage) void {
+    fn replyInterfaces(self: *Bridge, msg: *dbus.DBusMessage, target: *const a11y.Node) void {
         const reply = self.syms.message_new_method_return(msg) orelse return;
         defer self.syms.message_unref(reply);
         var it: dbus.DBusMessageIter = .{};
         self.syms.message_iter_init_append(reply, &it);
         var array_it: dbus.DBusMessageIter = .{};
         _ = self.syms.message_iter_open_container(&it, dbus.DBUS_TYPE_ARRAY, "s", &array_it);
-        for ([_][*:0]const u8{ atspi_accessible, atspi_action, atspi_component }) |name| {
+        // Only the interfaces that are answered for this node are listed. A
+        // reader believes the list, so naming one that returns nothing is worse
+        // than leaving it out.
+        const has_text = target.value.len > 0;
+        const has_value = target.numeric != null;
+        var names: [5][*:0]const u8 = undefined;
+        var count: usize = 0;
+        names[count] = atspi_accessible;
+        count += 1;
+        names[count] = atspi_component;
+        count += 1;
+        if (target.actions.len > 0) {
+            names[count] = atspi_action;
+            count += 1;
+        }
+        if (has_text) {
+            names[count] = atspi_text;
+            count += 1;
+        }
+        if (has_value) {
+            names[count] = atspi_value;
+            count += 1;
+        }
+        for (names[0..count]) |name| {
             _ = self.syms.message_iter_append_basic(&array_it, dbus.DBUS_TYPE_STRING, @ptrCast(&name));
         }
         _ = self.syms.message_iter_close_container(&it, &array_it);
         self.send(reply);
+    }
+
+    fn replyI32(self: *Bridge, msg: *dbus.DBusMessage, value: i32) void {
+        const reply = self.syms.message_new_method_return(msg) orelse return;
+        defer self.syms.message_unref(reply);
+        var it: dbus.DBusMessageIter = .{};
+        self.syms.message_iter_init_append(reply, &it);
+        var v = value;
+        _ = self.syms.message_iter_append_basic(&it, dbus.DBUS_TYPE_INT32, @ptrCast(&v));
+        self.send(reply);
+    }
+
+    fn replyDouble(self: *Bridge, msg: *dbus.DBusMessage, value: f64) void {
+        const reply = self.syms.message_new_method_return(msg) orelse return;
+        defer self.syms.message_unref(reply);
+        var it: dbus.DBusMessageIter = .{};
+        self.syms.message_iter_init_append(reply, &it);
+        var v = value;
+        _ = self.syms.message_iter_append_basic(&it, dbus.DBUS_TYPE_DOUBLE, @ptrCast(&v));
+        self.send(reply);
+    }
+
+    /// The `index`th int32 argument, for calls that take two.
+    fn argI32(self: *Bridge, msg: *dbus.DBusMessage, index: usize) ?i32 {
+        var it: dbus.DBusMessageIter = .{};
+        if (self.syms.message_iter_init(msg, &it) == 0) return null;
+        var i: usize = 0;
+        while (true) : (i += 1) {
+            const kind = self.syms.message_iter_get_arg_type(&it);
+            if (kind == dbus.DBUS_TYPE_INVALID) return null;
+            if (i == index) {
+                if (kind != dbus.DBUS_TYPE_INT32) return null;
+                var v: i32 = 0;
+                self.syms.message_iter_get_basic(&it, @ptrCast(&v));
+                return v;
+            }
+            _ = self.syms.message_iter_next(&it);
+        }
     }
 
     /// `GetActions` returns one struct per action: name, description, key

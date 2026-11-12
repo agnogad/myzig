@@ -129,11 +129,18 @@ tree never maps it.
 
 Implemented calls: `GetChildCount`, `GetChildAtIndex`, `GetChildren`, `GetRole`,
 `GetRoleName`, `GetName`, `GetDescription`, `GetState`, `GetParent`,
-`GetInterfaces`, `GetActions`, `GetActionName`, `DoAction`, `Contains`,
-`GetExtents`.
+`GetInterfaces`, `GetActions`, `GetActionName`, `DoAction`, `GetText`,
+`GetCharacterCount`, `GetCurrentValue`, `GetMinimumValue`, `GetMaximumValue`,
+`GetMinimumIncrement`, `GetValueText`, `Contains`, `GetExtents`.
 
-**Not implemented:** `GetText` and the value interface, so a slider's numeric
-value is not announced yet.
+The interface list is per node: `Action` only appears on something a reader can
+press, `Text` only where there is text, and `Value` only where there is a
+number. A reader believes the list, so naming an interface that answers nothing
+would be worse than leaving it out.
+
+**Not implemented:** editing. A reader can read a text field and a slider's
+value, but `SetTextContents` and `SetCurrentValue` are not answered, so a reader
+can inspect a value without being able to change it.
 
 ## Letting a reader press a button
 
@@ -152,6 +159,21 @@ works with a mouse works with a reader.
 
 A node with no actions is readable but not operable, which is the right default
 for a label.
+
+## A value a reader can compare
+
+```zig
+const slider = try b.beginNode(.slider, .{ .x = 16, .y = 220, .width = 240, .height = 20 });
+try b.setName(slider, "Opacity");
+try b.setValue(slider, "60%");
+b.setNumber(slider, .{ .value = 60, .min = 0, .max = 100, .step = 5 });
+b.endNode();
+```
+
+`setValue` is the text a reader speaks (`"60%"`); `setNumber` is what it
+compares. A reader announces position from the number and its range, because a
+string cannot tell it whether the slider is near the top. Both are published, so
+the spoken value and the range agree.
 
 ## Verifying it
 

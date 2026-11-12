@@ -133,6 +133,10 @@ pub const Node = struct {
     description: []const u8 = "",
     /// The current value, for a slider, progress bar or text field.
     value: []const u8 = "",
+    /// A slider's or progress bar's value as a number, which is what the
+    /// AT-SPI `Value` interface reports. A reader announces nothing from a
+    /// string it cannot compare, so a range is published alongside it.
+    numeric: ?Number = null,
     states: States = .{},
     /// Where this node sits among its siblings, which is what "item 2 of 5"
     /// is built from.
@@ -150,6 +154,15 @@ pub const Node = struct {
     id: u32 = 0,
     /// What a reader can do to this node, in the order a reader offers it.
     actions: []const Action = &.{},
+};
+
+/// A number a reader can compare against its range.
+pub const Number = struct {
+    value: f64,
+    min: f64 = 0,
+    max: f64 = 100,
+    /// The amount one step changes, which `increment` and `decrement` use.
+    step: f64 = 1,
 };
 
 /// Something an accessibility client can ask a node to do.
@@ -326,6 +339,13 @@ pub const Builder = struct {
         self.nodes.items[id].actions = table;
     }
 
+    /// Publishes a number and its range, which a reader compares against the
+    /// slider's limits instead of guessing from a string.
+    pub fn setNumber(self: *Builder, id: u32, n: Number) void {
+        if (id >= self.nodes.items.len) return;
+        self.nodes.items[id].numeric = n;
+    }
+
     pub fn setStates(self: *Builder, id: u32, states: States) void {
         if (id >= self.nodes.items.len) return;
         self.nodes.items[id].states = states;
@@ -487,6 +507,33 @@ test "an action is recorded and freed with the frame" {
     try std.testing.expectEqual(@as(usize, 1), snap.get(id).?.actions.len);
     try std.testing.expectEqualStrings("Save", snap.get(id).?.actions[0].name);
     try std.testing.expectEqual(Kind.press, snap.get(id).?.actions[0].kind);
+}
+
+test "a number is published with its range" {
+    const gpa = std.testing.allocator;
+    var b = Builder.init(gpa);
+    defer b.deinit();
+
+    try b.begin(.{ .width = 100, .height = 100 });
+    const id = try b.beginNode(.slider, .{ .width = 100, .height = 20 });
+    try b.setName(id, "Opacity");
+    try b.setValue(id, "60%");
+    b.setNumber(id, .{ .value = 60, .min = 0, .max = 100, .step = 5 });
+    b.endNode();
+
+    const n = b.snapshot().get(id).?.numeric.?;
+    try std.testing.expectEqual(@as(f64, 60), n.value);
+    try std.testing.expectEqual(@as(f64, 5), n.step);
+}
+
+test "a node without a number has none" {
+    const gpa = std.testing.allocator;
+    var b = Builder.init(gpa);
+    defer b.deinit();
+
+    try b.begin(.{ .width = 100, .height = 100 });
+    const id = try b.leaf(.label, .{ .width = 100, .height = 20 }, "hi");
+    try std.testing.expect(b.snapshot().get(id).?.numeric == null);
 }
 
 test "a new frame frees the old strings" {

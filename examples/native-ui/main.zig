@@ -37,6 +37,14 @@ fn describe(ctx: *anyopaque, builder: *anyopaque, size: myzig.platform.backend.D
     const line = std.fmt.bufPrint(&buf, "Clicks: {d}", .{state.clicks}) catch "Clicks";
     _ = b.leaf(.label, .{ .x = 16, .y = 72, .width = 240, .height = 16 }, line) catch return;
 
+    // A node with a value publishes the Text and Value interfaces, which is
+    // what a reader needs to announce what is in it rather than that it exists.
+    const slider = b.beginNode(.slider, .{ .x = 16, .y = 220, .width = 240, .height = 20 }) catch return;
+    b.setName(slider, "Opacity") catch return;
+    b.setValue(slider, "60%") catch return;
+    b.setNumber(slider, .{ .value = 60, .min = 0, .max = 100, .step = 5 });
+    b.endNode();
+
     for (labels, 0..) |label, i| {
         const id = b.beginNode(.button, frames[i]) catch return;
         b.setName(id, label) catch return;
