@@ -19,7 +19,7 @@ here only once it compiles, has tests, and has been run.
 | 5 | Command line: `new`, `generate`, `doctor` | **Done** |
 | 6 | Windows backend: Win32 + WebView2 | **Written, compiles for Windows, not yet run** |
 | 7 | macOS backend: AppKit + WKWebView | Not started |
-| 8 | Ecosystem: plugins, packaging, auto-update | Not started |
+| 8 | Ecosystem: plugins, packaging, auto-update | **In progress** (plugins and `myzig package` done; auto-update not started) |
 
 ## What works today
 

@@ -307,7 +307,7 @@ fn runPackage(ctx: Ctx, args: anytype) !void {
     // given, so a packaging run needs no arguments beyond the defaults.
     var name_buf: [128]u8 = undefined;
     if (name.len == 0) {
-        name = std.fmt.bufPrint(&name_buf, "{s}", .{try readManifestName(ctx, dir)}) catch "app";
+        name = readManifestName(ctx, dir, &name_buf);
     }
 
     // A program that has not been built cannot be packaged. Saying so is more
@@ -376,16 +376,37 @@ fn missingValue(ctx: Ctx, flag: []const u8) error{BadArgument} {
 }
 
 /// The `name` field of `build.zig.zon`, which is what the project calls itself.
-fn readManifestName(ctx: Ctx, dir: std.Io.Dir) ![]const u8 {
+///
+/// The name is copied into `out` before the file is freed: returning a slice
+/// of the file's memory would hand back a dangling pointer, which is exactly
+/// what the first version did.
+fn readManifestName(ctx: Ctx, dir: std.Io.Dir, out: []u8) []const u8 {
     const text = dir.readFileAlloc(ctx.io, "build.zig.zon", ctx.gpa, .limited(1024 * 1024)) catch {
         return "app";
     };
     defer ctx.gpa.free(text);
 
-    const key = ".name = .{ ";
-    const at = std.mem.indexOf(u8, text, key) orelse return "app";
+    const found = manifestName(text) orelse return "app";
+    if (found.len > out.len) return "app";
+    @memcpy(out[0..found.len], found);
+    return out[0..found.len];
+}
+
+/// The `name` field of a manifest, as a slice of `text`.
+fn manifestName(text: []const u8) ?[]const u8 {
+    // The manifest spells the name as an enum literal: `.name = .demo,`.
+    const key = ".name = .";
+    const at = std.mem.indexOf(u8, text, key) orelse return null;
     const rest = text[at + key.len ..];
-    const end = std.mem.indexOfScalar(u8, rest, ' ') orelse return "app";
+    // The name runs to the first character that cannot be part of it.
+    var end: usize = 0;
+    while (end < rest.len) : (end += 1) {
+        const c = rest[end];
+        const valid = (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or
+            (c >= '0' and c <= '9') or c == '_' or c == '-';
+        if (!valid) break;
+    }
+    if (end == 0) return null;
     return rest[0..end];
 }
 
@@ -484,6 +505,25 @@ const help_text =
     \\  help                    Print this list.
     \\
 ;
+
+test "the manifest name is read from the enum literal" {
+    // `myzig new` writes `.name = .demo,`; the parser used to look for the
+    // struct form and fell back to "app", which made `myzig package` claim the
+    // program was not built.
+    const text =
+        \\.{
+        \\    .name = .notes,
+        \\    .version = "0.1.0",
+        \\}
+    ;
+    try std.testing.expectEqualStrings("notes", manifestName(text).?);
+}
+
+test "a manifest without a name has none" {
+    try std.testing.expectEqual(@as(?[]const u8, null), manifestName(".{}"));
+    // Trailing garbage must not become part of the name.
+    try std.testing.expectEqualStrings("my_app-2", manifestName(".name = .my_app-2,").?);
+}
 
 test "the help text names every command" {
     // Every command `main` dispatches must be documented, or a user cannot

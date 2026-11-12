@@ -62,12 +62,29 @@ environment rather than of MyZig:
 
 ## Windows
 
-Backend: `src/platform/windows/`. **Not started.** Every entry point returns
-`error.NotSupported`, and `docs/PROGRESS.md` records it as unbuilt.
+Backend: `src/platform/windows/`. **Written and cross-compiled; never run.**
+There is no Windows machine to test on, so nothing below is verified, and this
+section says so rather than claiming otherwise.
 
-The planned shape is Win32 for windows and menus, WebView2 for pages, and
-Direct2D or Direct3D for the native surface. Nothing in the public API needs to
-change for it.
+| Feature | State | Notes |
+| --- | --- | --- |
+| Windows, resize, close, fullscreen | written, unrun | Win32, per-monitor DPI aware |
+| Web pages | written, unrun | WebView2 through COM |
+| `myzig://` scheme | **not written** | WebView2 needs a resource filter; pages load from `http` or `file` today |
+| Typed IPC | written, unrun | same bridge script as Linux |
+| Menu bar | written, unrun | `CreatePopupMenu` + `AppendMenu`, ids via `WM_COMMAND` |
+| Tray icon | **not written** | needs `Shell_NotifyIcon` |
+| Global shortcuts | **not written** | needs `RegisterHotKey` |
+| Native UI surface | written, unrun | off-screen DIB + `BitBlt`, software rasteriser |
+| Desktop APIs | **not written** | clipboard, dialogs, notifications |
+
+`WebView2Loader.dll` is opened at runtime, so an application that never opens a
+page never needs it. `bcryptprimitives.dll` is linked, because it is the only
+entropy source `std.os.windows` still reaches.
+
+The trusted-types CSP trick that lets the Linux bridge use `new Function` does
+not exist in WebView2 the same way; the bridge runs there unmodified but that
+part of it is untested.
 
 ## macOS
 

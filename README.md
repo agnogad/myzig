@@ -97,6 +97,8 @@ builds without a package registry.
 * [Plugins](docs/plugins.md) — packaging services and lifecycle hooks.
 * [Memory management](docs/memory-management.md) — who owns what.
 * [Platforms](docs/platforms.md) — what each backend supports.
+* [Packaging](docs/packaging.md) — `myzig package`, desktop entries, what is
+  not built yet.
 * [Progress](docs/PROGRESS.md) — milestones and what is verified.
 
 ## Examples
