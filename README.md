@@ -47,7 +47,7 @@ stubs that return `NotSupported` from every entry point; they are listed in
 | Clipboard, dialogs, notifications, menus, tray, global shortcuts | works |
 | Native UI: layout, software rasteriser, bitmap text, mouse input | works |
 | Plugins | works |
-| `myzig` command line: `new`, `generate`, `package`, `doctor` | works |
+| `myzig` command line: `new`, `generate`, `package`, `package --deb`, `doctor` | works |
 | Windows backend (Win32 + WebView2) | compiles for Windows, never run |
 | macOS backend (AppKit + WKWebView) | not started |
 | Accessibility (AT-SPI) | done on Linux; not on Windows or macOS |

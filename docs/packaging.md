@@ -99,3 +99,52 @@ These are honest gaps, not oversights:
 
 Until then, the staged directory plus a tarball of it is what `myzig package`
 gives you, and it is enough to hand a working program to someone else.
+
+## A Debian package
+
+```sh
+zig build install
+myzig package --deb
+```
+
+That writes `dist/NAME_VERSION_amd64.deb` beside the staged directory.
+
+The format is an `ar` archive of three members — `debian-binary`, the control
+tarball and the data tarball — and this produces it with `ar`, `tar` and
+`gzip`, which every machine with a shell has. Nothing needs `dpkg-deb`, so a
+project can be packaged on a system that cannot install packages itself.
+
+What the package installs:
+
+```text
+/usr/bin/NAME
+/usr/share/applications/NAME.desktop
+```
+
+What it deliberately does not contain:
+
+| Missing | Why |
+| --- | --- |
+| `Depends` | The shared libraries the program needs are not known here. A guessed list installs cleanly and fails at start, which is worse than saying nothing. |
+| Maintainer scripts | There is nothing to configure. |
+| A signature | Signing needs a key that belongs to whoever publishes, not to a build tool. |
+
+`Installed-Size` is the real size of the executable, rounded up to KiB, because
+a package manager uses it to decide whether there is room.
+
+Inspect one without installing it:
+
+```sh
+ar t dist/debtest_0.1.0_amd64.deb          # member order
+mkdir /tmp/debx && cd /tmp/debx
+ar x /path/to/debtest_0.1.0_amd64.deb
+tar xzf control.tar.gz && cat control
+tar tzf data.tar.gz
+```
+
+## What is not written yet
+
+AppImage needs a runtime binary and `mksquashfs`, neither of which ships with a
+C toolchain; a `.app` bundle and code signing need macOS; auto-update needs a
+server and a signature scheme. `myzig package` does not pretend to do any of
+them and its output says so.

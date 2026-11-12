@@ -286,6 +286,7 @@ fn runPackage(ctx: Ctx, args: anytype) !void {
     var name: []const u8 = "";
     var version: []const u8 = "0.1.0";
     var out_dir: []const u8 = "dist";
+    var make_deb = false;
 
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--name")) {
@@ -294,6 +295,8 @@ fn runPackage(ctx: Ctx, args: anytype) !void {
             version = args.next() orelse return missingValue(ctx, "--version");
         } else if (std.mem.eql(u8, arg, "--out")) {
             out_dir = args.next() orelse return missingValue(ctx, "--out");
+        } else if (std.mem.eql(u8, arg, "--deb")) {
+            make_deb = true;
         } else {
             var buf: [256]u8 = undefined;
             try ctx.err(try std.fmt.bufPrint(&buf, "myzig package: unknown option '{s}'\n", .{arg}));
@@ -364,6 +367,16 @@ fn runPackage(ctx: Ctx, args: anytype) !void {
     const desktop_path = try std.fmt.bufPrint(&desktop_path_buf, "{s}/{s}.desktop", .{ stage, name });
     try writeFile(ctx, dir, desktop_path, desktop);
 
+    if (make_deb) {
+        try buildDeb(ctx, dir, .{
+            .name = name,
+            .version = version,
+            .stage = stage,
+            .exe = exe_dest,
+            .desktop = desktop_path,
+        });
+    }
+
     var summary: [512]u8 = undefined;
     try ctx.out(try std.fmt.bufPrint(&summary,
         \\packaged {s} {s}
@@ -371,6 +384,189 @@ fn runPackage(ctx: Ctx, args: anytype) !void {
         \\  {s}
         \\
     , .{ name, version, stage, name, desktop_path }));
+}
+
+/// The pieces `buildDeb` needs, gathered so the call site stays readable.
+const DebInput = struct {
+    name: []const u8,
+    version: []const u8,
+    /// The staged directory, holding the executable and the desktop entry.
+    stage: []const u8,
+    exe: []const u8,
+    desktop: []const u8,
+};
+
+/// Writes a `.deb` beside the staged directory.
+///
+/// The format is an `ar` archive of three members — `debian-binary`, a control
+/// tarball and a data tarball — so it is produced with `ar`, `tar` and `gzip`,
+/// which every machine with a shell has. Nothing here needs `dpkg-deb`, which
+/// means `myzig package --deb` works on a system that cannot install packages
+/// itself.
+///
+/// What the package does not contain: maintainer scripts, dependencies and a
+/// signature. A program that needs a shared library the target does not have
+/// will install cleanly and fail to start, so the `Depends` field is left out
+/// rather than guessed wrong.
+fn buildDeb(ctx: Ctx, dir: std.Io.Dir, in: DebInput) !void {
+    var tree_buf: [512]u8 = undefined;
+    const tree = std.fmt.bufPrint(&tree_buf, "{s}/.deb", .{in.stage}) catch return error.NameTooLong;
+    dir.createDirPath(ctx.io, tree) catch |e| {
+        var buf: [512]u8 = undefined;
+        try ctx.err(try std.fmt.bufPrint(&buf, "myzig package: cannot create {s}: {s}\n", .{ tree, @errorName(e) }));
+        std.process.exit(1);
+    };
+
+    // data.tar.gz
+    var data_tree_buf: [640]u8 = undefined;
+    const data_tree = std.fmt.bufPrint(&data_tree_buf, "{s}/data/usr", .{tree}) catch
+        return error.NameTooLong;
+    var bin_dir_buf: [704]u8 = undefined;
+    const bin_dir = std.fmt.bufPrint(&bin_dir_buf, "{s}/bin", .{data_tree}) catch return error.NameTooLong;
+    var share_buf: [704]u8 = undefined;
+    const share_dir = std.fmt.bufPrint(&share_buf, "{s}/share/applications", .{data_tree}) catch
+        return error.NameTooLong;
+    dir.createDirPath(ctx.io, bin_dir) catch {};
+    dir.createDirPath(ctx.io, share_dir) catch {};
+
+    var dest_buf: [768]u8 = undefined;
+    const exe_dest = std.fmt.bufPrint(&dest_buf, "{s}/{s}", .{ bin_dir, in.name }) catch
+        return error.NameTooLong;
+    copyFile(ctx, dir, in.exe, exe_dest, 0o755) catch |e| {
+        var buf: [512]u8 = undefined;
+        try ctx.err(try std.fmt.bufPrint(&buf, "myzig package: cannot stage {s}: {s}\n", .{ exe_dest, @errorName(e) }));
+        std.process.exit(1);
+    };
+
+    var desk_dest_buf: [832]u8 = undefined;
+    const desk_dest = std.fmt.bufPrint(&desk_dest_buf, "{s}/{s}.desktop", .{ share_dir, in.name }) catch
+        return error.NameTooLong;
+    copyFile(ctx, dir, in.desktop, desk_dest, 0o644) catch {};
+
+    // control.tar.gz
+    var control_buf: [640]u8 = undefined;
+    const control = std.fmt.bufPrint(&control_buf, "{s}/control", .{tree}) catch return error.NameTooLong;
+    dir.createDirPath(ctx.io, control) catch {};
+
+    // Debian's installed size is in KiB, rounded up, and it is the unpacked
+    // size of the data tarball. Saying 0 would be wrong and a reader of the
+    // package would not know how much room it needs.
+    const exe_size = blk: {
+        const f = dir.openFile(ctx.io, in.exe, .{}) catch break :blk @as(u64, 0);
+        defer f.close(ctx.io);
+        break :blk (f.stat(ctx.io) catch break :blk @as(u64, 0)).size;
+    };
+    const kib = (exe_size + 1023) / 1024;
+
+    var control_text_buf: [1024]u8 = undefined;
+    const control_text = std.fmt.bufPrint(&control_text_buf,
+        \\Package: {s}
+        \\Version: {s}
+        \\Architecture: amd64
+        \\Maintainer: unknown <unknown@example.com>
+        \\Installed-Size: {d}
+        \\Section: utils
+        \\Priority: optional
+        \\Description: {s}, built with MyZig
+        \\ A desktop application packaged by `myzig package`.
+        \\
+    , .{ in.name, in.version, kib, in.name }) catch return error.NameTooLong;
+
+    var control_file_buf: [704]u8 = undefined;
+    const control_file = std.fmt.bufPrint(&control_file_buf, "{s}/control/control", .{tree}) catch
+        return error.NameTooLong;
+    try writeFile(ctx, dir, control_file, control_text);
+
+    // Marking the files as root-owned is what a package should contain.
+    // `fakeroot` is not always installed, so the mode bits are the only thing
+    // promised; `dpkg` accepts an unpacked tree whoever owns it.
+    var data_tar_buf: [704]u8 = undefined;
+    const data_tar = std.fmt.bufPrint(&data_tar_buf, "{s}/data.tar.gz", .{tree}) catch return error.NameTooLong;
+    var ctrl_tar_buf: [704]u8 = undefined;
+    const ctrl_tar = std.fmt.bufPrint(&ctrl_tar_buf, "{s}/control.tar.gz", .{tree}) catch return error.NameTooLong;
+
+    var data_cwd_buf: [704]u8 = undefined;
+    const data_cwd = std.fmt.bufPrint(&data_cwd_buf, "{s}/data", .{tree}) catch return error.NameTooLong;
+    var ctrl_cwd_buf: [704]u8 = undefined;
+    const ctrl_cwd = std.fmt.bufPrint(&ctrl_cwd_buf, "{s}/control", .{tree}) catch return error.NameTooLong;
+
+    var abs_data_buf: [768]u8 = undefined;
+    const abs_data = absPath(ctx, &abs_data_buf, data_tar);
+    var abs_ctrl_buf: [768]u8 = undefined;
+    const abs_ctrl = absPath(ctx, &abs_ctrl_buf, ctrl_tar);
+
+    try runTool(ctx, &.{ "tar", "-czf", abs_data, "-C", data_cwd, "usr" });
+    try runTool(ctx, &.{ "tar", "-czf", abs_ctrl, "-C", ctrl_cwd, "control" });
+
+    // `ar` needs the members in this order, and rejects a long name it does not
+    // expect, hence the copy into the tree with the right names.
+    var deb_buf: [704]u8 = undefined;
+    const deb = std.fmt.bufPrint(&deb_buf, "{s}/{s}_{s}_amd64.deb", .{ "dist", in.name, in.version }) catch
+        return error.NameTooLong;
+
+    var binary_buf: [704]u8 = undefined;
+    const binary = std.fmt.bufPrint(&binary_buf, "{s}/debian-binary", .{tree}) catch return error.NameTooLong;
+    try writeFile(ctx, dir, binary, "2.0\n");
+
+    var abs_binary_buf: [768]u8 = undefined;
+    const abs_binary = absPath(ctx, &abs_binary_buf, binary);
+    var abs_deb_buf: [768]u8 = undefined;
+    const abs_deb = absPath(ctx, &abs_deb_buf, deb);
+
+    // The members are written in the order the format requires. `ar` stores
+    // whatever order it is given, and `dpkg` rejects a package whose
+    // `debian-binary` is not first.
+    std.Io.Dir.cwd().deleteFile(ctx.io, deb) catch {};
+    try runTool(ctx, &.{ "ar", "rcD", abs_deb, abs_binary, abs_ctrl, abs_data });
+
+    try ctx.out(try std.fmt.bufPrint(&summary_buf, "  {s}\n", .{deb}));
+}
+
+var summary_buf: [512]u8 = undefined;
+
+/// Runs an external tool, reporting its stderr when it fails. The tools used
+/// are `tar` and `ar`, which every shell has; a missing one is a clear message
+/// rather than a broken package.
+fn runTool(ctx: Ctx, argv: []const []const u8) !void {
+    const result = std.process.run(ctx.gpa, ctx.io, .{ .argv = argv }) catch |e| {
+        var buf: [512]u8 = undefined;
+        try ctx.err(try std.fmt.bufPrint(&buf, "myzig package: cannot run {s}: {s}\n", .{ argv[0], @errorName(e) }));
+        std.process.exit(1);
+    };
+    defer ctx.gpa.free(result.stdout);
+    defer ctx.gpa.free(result.stderr);
+
+    if (!result.term.success()) {
+        var buf: [512]u8 = undefined;
+        try ctx.err(try std.fmt.bufPrint(&buf, "myzig package: {s} failed: {s}\n", .{ argv[0], result.stderr }));
+        std.process.exit(1);
+    }
+}
+
+/// Resolves a path against the current directory, because the external tools
+/// run from a subdirectory and a relative path would point somewhere else.
+fn absPath(ctx: Ctx, out: []u8, path: []const u8) []const u8 {
+    if (path.len > 0 and path[0] == '/') {
+        const n = @min(path.len, out.len);
+        @memcpy(out[0..n], path[0..n]);
+        return out[0..n];
+    }
+    // `realPath` writes into the buffer and returns how many bytes it used.
+    // The last byte is kept for the separator and the path that follows.
+    const limit = @min(out.len - path.len - 2, 1024);
+    const n = std.Io.Dir.cwd().realPath(ctx.io, out[0..limit]) catch return path;
+    out[n] = '/';
+    @memcpy(out[n + 1 ..][0..path.len], path);
+    return out[0 .. n + 1 + path.len];
+}
+
+fn copyFile(ctx: Ctx, dir: std.Io.Dir, from: []const u8, to: []const u8, mode: u32) !void {
+    const data = try dir.readFileAlloc(ctx.io, from, ctx.gpa, .limited(512 * 1024 * 1024));
+    defer ctx.gpa.free(data);
+    try writeFile(ctx, dir, to, data);
+    if (@import("builtin").os.tag != .windows) {
+        dir.setFilePermissions(ctx.io, to, std.Io.File.Permissions.fromMode(mode), .{}) catch {};
+    }
 }
 
 fn missingValue(ctx: Ctx, flag: []const u8) error{BadArgument} {
@@ -509,6 +705,18 @@ const help_text =
     \\  help                    Print this list.
     \\
 ;
+
+test "a deb path is made absolute against the current directory" {
+    // The external tools run from a subdirectory, so a relative member path
+    // would point somewhere else. This pins the join and the sizes.
+    const ctx = Ctx{ .io = std.testing.io, .gpa = std.testing.allocator };
+    var buf: [256]u8 = undefined;
+    const abs = absPath(ctx, &buf, "dist/x.deb");
+    try std.testing.expect(abs.len > "dist/x.deb".len);
+    try std.testing.expect(std.mem.endsWith(u8, abs, "/dist/x.deb"));
+    // An absolute path is passed through untouched.
+    try std.testing.expectEqualStrings("/already/absolute", absPath(ctx, &buf, "/already/absolute"));
+}
 
 test "the manifest name is read from the enum literal" {
     // `myzig new` writes `.name = .demo,`; the parser used to look for the
