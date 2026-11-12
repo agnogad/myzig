@@ -1,0 +1,136 @@
+const std = @import("std");
+
+pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+
+    // ---------------------------------------------------------------- module
+    // `myzig` is the framework module application code imports.
+    const myzig = b.addModule("myzig", .{
+        .root_source_file = b.path("src/myzig.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    configureNative(myzig, target);
+
+    // ----------------------------------------------------------- examples
+    // Each example is a standalone application that depends on the module.
+    const examples = [_]struct { name: []const u8, path: []const u8, desc: []const u8 }{
+        .{ .name = "hello-webview", .path = "examples/hello-webview/main.zig", .desc = "A window showing a web page served by MyZig" },
+        .{ .name = "hello-window", .path = "examples/hello-window/main.zig", .desc = "Open and close a native window" },
+        .{ .name = "ipc-greeter", .path = "examples/ipc-greeter/main.zig", .desc = "Typed Zig <-> TypeScript calls" },
+        .{ .name = "counter-native", .path = "examples/counter-native/main.zig", .desc = "Native GPU-rendered counter UI" },
+        .{ .name = "hybrid", .path = "examples/hybrid/main.zig", .desc = "Native chrome around a web view" },
+        .{ .name = "desktop-api", .path = "examples/desktop-api/main.zig", .desc = "Clipboard, dialogs, notifications, tray" },
+    };
+
+    const run_all = b.step("examples", "Build all examples");
+    for (examples) |ex| {
+        {
+            const exe = b.addExecutable(.{
+                .name = ex.name,
+                .root_module = b.createModule(.{
+                    .root_source_file = b.path(ex.path),
+                    .target = target,
+                    .optimize = optimize,
+                    .imports = &.{.{ .name = "myzig", .module = myzig }},
+                }),
+            });
+            configureNative(exe.root_module, target);
+            b.installArtifact(exe);
+
+            const run_cmd = b.addRunArtifact(exe);
+            run_cmd.step.dependOn(b.getInstallStep());
+            const step = b.step(ex.name, ex.desc);
+            step.dependOn(&run_cmd.step);
+            run_all.dependOn(&exe.step);
+        }
+    }
+
+    // ------------------------------------------------------------------ cli
+    const cli_exe = b.addExecutable(.{
+        .name = "myzig",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("cli/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "myzig", .module = myzig }},
+        }),
+    });
+    cli_exe.root_module.link_libc = true;
+    b.installArtifact(cli_exe);
+
+    const run_cli = b.addRunArtifact(cli_exe);
+    const cli_step = b.step("cli", "Run the myzig command line tool");
+    cli_step.dependOn(&run_cli.step);
+
+    // ---------------------------------------------------------------- tests
+    const test_step = b.step("test", "Run all unit and integration tests");
+
+    const unit_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/myzig.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    configureNative(unit_tests.root_module, target);
+    const run_unit = b.addRunArtifact(unit_tests);
+    run_unit.has_side_effects = true;
+    test_step.dependOn(&run_unit.step);
+
+    // Integration tests exercise the public API through a separate root.
+    const integration_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/all.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "myzig", .module = myzig }},
+        }),
+    });
+    configureNative(integration_tests.root_module, target);
+    const run_integration = b.addRunArtifact(integration_tests);
+    run_integration.has_side_effects = true;
+    test_step.dependOn(&run_integration.step);
+
+    const cli_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("cli/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "myzig", .module = myzig }},
+        }),
+    });
+    const run_cli_tests = b.addRunArtifact(cli_tests);
+    test_step.dependOn(&run_cli_tests.step);
+
+    // --------------------------------------------------------------- benchs
+    const bench_exe = b.addExecutable(.{
+        .name = "myzig-bench",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("benchmarks/main.zig"),
+            .target = target,
+            .optimize = .ReleaseFast,
+            .imports = &.{.{ .name = "myzig", .module = myzig }},
+        }),
+    });
+    configureNative(bench_exe.root_module, target);
+    const run_bench = b.addRunArtifact(bench_exe);
+    const bench_step = b.step("bench", "Run performance benchmarks");
+    bench_step.dependOn(&run_bench.step);
+}
+
+/// Platform libraries the Linux backend talks to.
+///
+/// MyZig loads GTK, WebKitGTK, X11 and friends at run time through
+/// `std.DynLib` so that an application links nothing platform specific and an
+/// app whose windows show only native UI never maps WebKit. We still add the
+/// include and library paths so that generated declarations stay verifiable,
+/// and so that optional symbol lookups resolve at link time when present.
+fn configureNative(mod: *std.Build.Module, target: std.Build.ResolvedTarget) void {
+    mod.link_libc = true;
+    _ = target;
+    // Nothing is linked: every system library is dlopen'd. This keeps
+    // binaries small and lets MyZig start on systems missing a library.
+}
