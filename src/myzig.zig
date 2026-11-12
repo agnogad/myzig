@@ -123,5 +123,6 @@ test {
         _ = @import("platform/linux/ffi.zig");
         _ = @import("platform/linux/dbus.zig");
         _ = @import("platform/linux/atspi.zig");
+        _ = @import("platform/linux/appindicator.zig");
     }
 }

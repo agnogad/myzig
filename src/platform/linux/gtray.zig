@@ -18,6 +18,7 @@ const std = @import("std");
 const ffi = @import("ffi.zig");
 const log = @import("../../log.zig");
 const menu_mod = @import("../../menu.zig");
+const appindicator = @import("appindicator.zig");
 
 /// A tray icon the application owns.
 pub const Tray = struct {
@@ -42,7 +43,19 @@ pub fn setClickSink(sink: ClickSink) void {
 }
 
 /// Shows a tray icon from a themed icon name such as `"applications-system"`.
-/// Returns false when the desktop has no tray, or the theme has no such icon.
+///
+/// Two paths exist, and neither can prove the user sees the icon:
+///
+/// * `GtkStatusIcon`, which is only embedded when the desktop has an XEmbed
+///   status area. That check is direct, and it is what the `true` below means.
+/// * An AppIndicator on the StatusNotifier protocol, used when there is no
+///   status area. The library has no way to ask whether a host is running, so
+///   `true` from that path means "handed to the shell", not "visible".
+///
+/// Returns false when neither path produced an object, or the theme has no such
+/// icon. The difference between "shown" and "handed over" is logged at debug
+/// level rather than swallowed, because an application that offers a tray-only
+/// way to quit deserves to know which it got.
 pub fn create(allocator: std.mem.Allocator, icon_name: []const u8, tooltip: []const u8) bool {
     destroy();
     tray_allocator = allocator;
@@ -70,14 +83,38 @@ pub fn create(allocator: std.mem.Allocator, icon_name: []const u8, tooltip: []co
 
     tray = .{ .icon = icon, .tooltip = tip };
 
-    // An icon that is not embedded has no status area to live in, which is a
-    // real limitation the application should hear about.
+    // An icon that is not embedded has no status area to live in. GNOME and
+    // Wayland have none at all, so the AppIndicator protocol is tried next;
+    // that is what a modern shell shows.
     if (ffi.gtk_status_icon_is_embedded(icon) == ffi.FALSE) {
-        log.debug("tray: the desktop shows no status area; the icon is hidden", .{});
-        return false;
+        log.debug("tray: no XEmbed status area; trying an AppIndicator", .{});
+        // The invisible X11 icon is dropped: leaving it would keep a second
+        // object alive for a tray nobody can see.
+        _ = ffi.g_object_unref(@ptrCast(icon));
+        allocator.free(owned);
+        tray = null;
+        return createIndicator(allocator, icon_name, tooltip);
     }
     return true;
 }
+
+/// The AppIndicator path, for a shell with no XEmbed status area.
+fn createIndicator(allocator: std.mem.Allocator, icon_name: []const u8, tooltip: []const u8) bool {
+    // The indicator is parented by the application, not by a widget, so it is
+    // kept here for as long as the tray exists.
+    indicator_allocator = allocator;
+    owned_indicator = appindicator.create(allocator, "myzig", icon_name, tooltip) catch |e| {
+        log.debug("tray: no indicator either ({s}); the desktop shows no tray", .{@errorName(e)});
+        return false;
+    };
+
+    log.debug("tray: shown through the StatusNotifier protocol", .{});
+    return true;
+}
+
+/// The AppIndicator, when that is the path in use.
+var owned_indicator: ?appindicator.Indicator = null;
+var indicator_allocator: std.mem.Allocator = std.heap.page_allocator;
 
 fn onActivate(_: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
     const sink = click_sink orelse return;
@@ -85,6 +122,10 @@ fn onActivate(_: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
 }
 
 pub fn destroy() void {
+    if (owned_indicator) |ind| {
+        appindicator.destroy(ind, indicator_allocator);
+        owned_indicator = null;
+    }
     if (tray) |t| {
         _ = ffi.g_object_unref(@ptrCast(t.icon));
         tray_allocator.free(t.tooltip);

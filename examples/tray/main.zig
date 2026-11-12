@@ -61,7 +61,13 @@ fn setupDesktop(ctx: ?*anyopaque) void {
     const app: *myzig.App = @ptrCast(@alignCast(ctx.?));
 
     const tray_ok = app.createTray("applications-system", "MyZig tray example");
-    std.debug.print("tray: {s}\n", .{if (tray_ok) "shown" else "not shown (no status area)"});
+    // An AppIndicator is only visible when the shell runs a StatusNotifier
+    // host, and there is no call to ask. `true` therefore means the icon was
+    // handed to the shell, not that it is on screen.
+    std.debug.print("tray: {s}\n", .{if (tray_ok)
+        "handed to the shell (visible if it shows indicators)"
+    else
+        "not created (no tray and no indicator library)"});
 
     app.registerShortcut("Ctrl+Alt+T") catch |e| {
         std.debug.print("shortcut Ctrl+Alt+T: {s}\n", .{@errorName(e)});

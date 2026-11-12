@@ -39,6 +39,7 @@ Libraries are loaded with `std.DynLib` at the moment a feature needs them:
 | `libcairo.so.2` | the first native surface is created |
 | `libX11.so.6` | the first global shortcut is bound |
 | `libdbus-1.so.3` | a window first publishes an accessibility tree |
+| `libappindicator3.so.1` | a tray is asked for on a desktop with no XEmbed status area |
 
 So a native-only application never maps a web engine, and a page-only
 application never maps cairo.
