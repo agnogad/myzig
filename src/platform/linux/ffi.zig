@@ -267,6 +267,8 @@ pub var webkit_web_view_terminate_web_process: *const fn (w: WebKitWebView) call
 pub var webkit_web_view_get_estimated_load_progress: *const fn (w: WebKitWebView) callconv(.c) f64 = undefined;
 pub var webkit_web_inspector_show: *const fn (i: WebKitWebInspector) callconv(.c) void = undefined;
 pub var webkit_web_view_get_inspector: *const fn (w: WebKitWebView) callconv(.c) ?WebKitWebInspector = undefined;
+pub var webkit_javascript_result_get_js_value: *const fn (r: gpointer) callconv(.c) ?gpointer = undefined;
+pub var webkit_javascript_result_unref: *const fn (r: gpointer) callconv(.c) void = undefined;
 pub var webkit_navigation_action_get_request: *const fn (a: gpointer) callconv(.c) ?gpointer = undefined;
 pub var webkit_policy_decision_ignore: *const fn (d: gpointer) callconv(.c) void = undefined;
 pub var webkit_navigation_policy_decision_get_navigation_action: *const fn (d: gpointer) callconv(.c) ?gpointer = undefined;
@@ -532,6 +534,8 @@ const webkit_syms = .{
     .{ "webkit_uri_scheme_request_finish_error", "webkit_uri_scheme_request_finish_error" },
     .{ "webkit_web_view_terminate_web_process", "webkit_web_view_terminate_web_process" },
     .{ "webkit_web_view_get_estimated_load_progress", "webkit_web_view_get_estimated_load_progress" },
+    .{ "webkit_javascript_result_get_js_value", "webkit_javascript_result_get_js_value" },
+    .{ "webkit_javascript_result_unref", "webkit_javascript_result_unref" },
     .{ "webkit_navigation_action_get_request", "webkit_navigation_action_get_request" },
     .{ "webkit_uri_request_get_uri", "webkit_uri_request_get_uri" },
     .{ "webkit_policy_decision_ignore", "webkit_policy_decision_ignore" },

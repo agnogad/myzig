@@ -36,6 +36,8 @@ const loop = @import("loop.zig");
 const alloc = @import("allocator.zig");
 const paths_mod = @import("utils/paths.zig");
 const env = @import("utils/env.zig");
+const ipc_mod = @import("ipc/ipc.zig");
+const json = @import("json.zig");
 const window_mod = @import("window.zig");
 
 pub const Window = window_mod.Window;
@@ -132,6 +134,8 @@ pub const App = struct {
     quit_requested: bool = false,
     /// Set when a listener cancelled a quit.
     quit_cancelled: bool = false,
+    /// The typed IPC layer: services, subscriptions and in-flight cancels.
+    ipc: ipc_mod.Exchange,
 
     const OwnedOptions = struct {
         name: []const u8,
@@ -225,6 +229,7 @@ pub const App = struct {
             .paths = paths,
             .be = .{ .ctx = undefined, .vtable = &backend_vtable },
             .be_storage = newBackend(),
+            .ipc = ipc_mod.Exchange.init(allocator),
             .options = .{
                 .name = app_name,
                 .app_id = app_id,
@@ -264,6 +269,7 @@ pub const App = struct {
         self.listeners.on_before_quit.deinit(self.gpa);
         self.listeners.on_before_quit_ctx.deinit(self.gpa);
         self.scratch.deinit();
+        self.ipc.deinit();
         self.paths.deinit();
         self.arena.deinit();
         self.phase = .stopped;
@@ -289,6 +295,40 @@ pub const App = struct {
             .ctx = @ptrCast(&self.be_storage),
             .vtable = &backend_vtable,
         };
+        // Replies and events reach the page through the same backend call the
+        // application uses for `eval`, so the IPC layer never touches a
+        // platform handle.
+        self.ipc.attach(.{
+            .ctx = self,
+            .eval = evalForIpc,
+        });
+    }
+
+    fn evalForIpc(ctx: ?*anyopaque, window: u32, code: []const u8) bool {
+        const self: *App = @ptrCast(@alignCast(ctx.?));
+        if (self.phase != .running) return false;
+        const slot = window % max_windows;
+        if (self.windows[slot] == null) return false;
+        self.be.vtable.eval_js(self.be.ctx, window, code) catch return false;
+        return true;
+    }
+
+    /// Registers a callable method. Generated glue calls this once per method
+    /// at startup; a duplicate name is a programming error and returns
+    /// `error.DuplicateName`.
+    pub fn bind(self: *App, method: ipc_mod.service.Method) !void {
+        try self.ipc.registry.add(method);
+    }
+
+    /// Registers every method in a slice, for generated glue.
+    pub fn bindAll(self: *App, methods: []const ipc_mod.service.Method) !void {
+        try self.ipc.registry.addAll(methods);
+    }
+
+    /// Sends `payload` to every window subscribed to `name`. Returns the number
+    /// of windows addressed.
+    pub fn emit(self: *App, event: []const u8, payload: json.Value) usize {
+        return self.ipc.emit(event, payload);
     }
 
     /// The vtable of the selected backend, resolved at comptime.
@@ -747,6 +787,9 @@ pub const App = struct {
     }
     fn onWindowClosed(ctx: *anyopaque, id: u32) void {
         const self = fromCtx(ctx);
+        // Drop the window's subscriptions before the handle disappears, so an
+        // event cannot be addressed to a page that no longer exists.
+        self.ipc.forgetWindow(id);
         self.destroyWindow(.{ .id = id });
     }
     fn onWindowCloseRequested(ctx: *anyopaque, id: u32) void {
@@ -820,9 +863,9 @@ pub const App = struct {
         if (self.windowState(.{ .id = id })) |st| st.dom_ready = true;
     }
     fn onWebMessage(ctx: *anyopaque, id: u32, message: []const u8) void {
-        _ = ctx;
-        _ = id;
-        _ = message;
+        const self = fromCtx(ctx);
+        if (self.windowState(.{ .id = id }) == null) return;
+        self.ipc.deliver(id, message);
     }
     fn onWebConsole(ctx: *anyopaque, id: u32, level: events.ConsoleLevel, text: []const u8) void {
         _ = ctx;

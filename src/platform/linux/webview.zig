@@ -132,6 +132,9 @@ pub fn createFor(id: u32, parent: ffi.GtkWindow, opts: backend.WindowOptions) Er
     // The custom scheme must exist before the first web view, or WebKit treats
     // `myzig://` as an unknown protocol and refuses to load it.
     if (host_app) |a| scheme.install(a);
+    // The message handler reads its argument through JavaScriptCore, so that
+    // library must be resolved before the first message can arrive.
+    loadJsCore();
     const ucm = ffi.webkit_user_content_manager_new() orelse return error.NotSupported;
 
     // Inject the IPC bridge before any page script runs, in the top frame only:
@@ -284,22 +287,49 @@ fn onUriChanged(id: u32) void {
 }
 
 fn onMessage(id: u32, value: *anyopaque) void {
-    const v = views.getPtr(id) orelse return;
+    const v = views.getPtr(id) orelse {
+        log.debug("ipc: message for unknown window {d}", .{id});
+        return;
+    };
     _ = v;
+    log.debug("ipc: message arrived on window {d}", .{id});
     // The message is a JSCValue holding the string the bridge posted. WebKitGTK
     // hands it as the signal's JSCValue argument; read it as a UTF-8 string
     // through JavaScriptCore, which WebKitGTK links.
     const s = sink orelse return;
     var buf: [1 << 16]u8 = undefined;
-    const text = jscString(&buf, value) orelse return;
+    const text = readMessage(&buf, value) orelse {
+        log.debug("ipc: could not read the message string (is JavaScriptCore loaded?)", .{});
+        return;
+    };
     s.webMessage(id, text);
 }
 
-/// Reads a JSCValue string. `jsc_value_to_string` returns transfer-full UTF-8
-/// that JavaScriptCore frees with `g_free`.
+/// Reads a page message.
+///
+/// WebKitGTK delivers a `script-message-received::<name>` argument as a
+/// `WebKitJavascriptResult`, not a `JSCValue`: the value must be unwrapped
+/// first. The result is transferred to the handler and released here.
+fn readMessage(buf: []u8, result: *anyopaque) ?[]const u8 {
+    defer ffi.webkit_javascript_result_unref(result);
+    const value = ffi.webkit_javascript_result_get_js_value(result) orelse {
+        log.debug("ipc: the javascript result holds no value", .{});
+        return null;
+    };
+    return jscString(buf, value);
+}
+
+/// Reads a JSCValue string. `jsc_value_to_string` returns UTF-8 owned by
+/// JavaScriptCore; `g_free` releases it.
 fn jscString(buf: []u8, value: *anyopaque) ?[]const u8 {
-    const jsc = js_core orelse return null;
-    const raw = jsc.to_string(value) orelse return null;
+    const jsc = js_core orelse {
+        log.debug("ipc: JavaScriptCore not loaded at message time", .{});
+        return null;
+    };
+    const raw = jsc.to_string(value) orelse {
+        log.debug("ipc: jsc_value_to_string returned null", .{});
+        return null;
+    };
     defer ffi.g_free(@ptrCast(raw));
     const n = std.mem.len(raw);
     if (n > buf.len) return null;
@@ -313,16 +343,26 @@ const JsCore = struct {
 
 var js_core: ?JsCore = null;
 var js_core_loaded = false;
+/// Held open for the process lifetime: a symbol looked up from a `DynLib`
+/// becomes invalid the moment the library is closed.
+var js_core_lib: ?std.DynLib = null;
 
 pub fn loadJsCore() void {
     if (js_core_loaded) return;
     js_core_loaded = true;
-    var lib = std.DynLib.open("libjavascriptcoregtk-4.1.so.0") catch {
-        std.DynLib.open("libjavascriptcoregtk-4.0.so.37") catch return;
+    var lib = std.DynLib.open("libjavascriptcoregtk-4.1.so.0") catch |e| blk: {
+        log.debug("ipc: cannot open JavaScriptCore 4.1: {s}", .{@errorName(e)});
+        break :blk std.DynLib.open("libjavascriptcoregtk-4.0.so.37") catch |e2| {
+            log.debug("ipc: cannot open JavaScriptCore 4.0 either: {s}", .{@errorName(e2)});
+            return;
+        };
+    };
+    const f = lib.lookup(*const fn (value: *anyopaque) callconv(.c) ?[*:0]u8, "jsc_value_to_string") orelse {
+        log.debug("ipc: jsc_value_to_string is missing", .{});
         return;
     };
-    const f = lib.lookup(*const fn (value: *anyopaque) callconv(.c) ?[*:0]u8, "jsc_value_to_string") orelse return;
     js_core = .{ .to_string = f };
+    js_core_lib = lib;
 }
 
 /// `WebKitPolicyDecisionType`: 0 navigation-action, 1 new-window-action,
