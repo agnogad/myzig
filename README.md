@@ -42,6 +42,8 @@ targets, but no one has run them: they are not claimed to work, and
 `docs/platforms.md` lists each feature that is missing rather than pretending
 otherwise.
 
+![The Notes example: a page rendered by WebKitGTK, talking to Zig over typed IPC](docs/images/notes.png)
+
 | Area | State |
 | --- | --- |
 | Windows, WebKitGTK pages, `myzig://` scheme | works |
