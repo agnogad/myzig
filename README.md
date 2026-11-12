@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/images/logo.svg" width="128" height="128" alt="MyZig">
+
 # MyZig
 
 **A desktop application framework for Zig.**

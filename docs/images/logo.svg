@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="MyZig">
+  <title>MyZig</title>
+
+  <!--
+    A desktop window with a Z inside it: the framework is a window, and the Z
+    is the language. Drawn as flat shapes with no gradients, so it stays legible
+    at 16 px and scales to any size without detail turning to mush.
+  -->
+
+  <!-- The window: a rounded square, dark, with a lighter title bar. -->
+  <rect x="16" y="16" width="224" height="224" rx="40" fill="#16181d"/>
+  <path d="M16 56a40 40 0 0 1 40-40h144a40 40 0 0 1 40 40v20H16z" fill="#23262e"/>
+  <rect x="16" y="76" width="224" height="2" fill="#2c3039"/>
+
+  <!-- The three window controls, as dots rather than glyphs. -->
+  <circle cx="52" cy="46" r="7" fill="#3a3f4a"/>
+  <circle cx="76" cy="46" r="7" fill="#3a3f4a"/>
+  <circle cx="100" cy="46" r="7" fill="#3a3f4a"/>
+
+  <!-- The Z, in Zig's orange. -->
+  <path d="M74 106h108v24l-64 60h64v24H74v-24l64-60H74z" fill="#f7a41d"/>
+</svg>

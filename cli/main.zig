@@ -358,10 +358,11 @@ fn runPackage(ctx: Ctx, args: anytype) !void {
         \\Name={s}
         \\Exec={s}
         \\Comment={s} {s}
+        \\Icon={s}
         \\Terminal=false
         \\Categories=Utility;
         \\
-    , .{ name, name, name, version }) catch return error.NameTooLong;
+    , .{ name, name, name, version, iconName(name) }) catch return error.NameTooLong;
 
     var desktop_path_buf: [512]u8 = undefined;
     const desktop_path = try std.fmt.bufPrint(&desktop_path_buf, "{s}/{s}.desktop", .{ stage, name });
@@ -573,6 +574,16 @@ fn missingValue(ctx: Ctx, flag: []const u8) error{BadArgument} {
     var buf: [128]u8 = undefined;
     ctx.err(std.fmt.bufPrint(&buf, "myzig package: {s} needs a value\n", .{flag}) catch "missing value\n") catch {};
     return error.BadArgument;
+}
+
+/// The name a desktop uses to look up an icon.
+///
+/// A `.desktop` entry's `Icon` is a name the theme resolves, not a path, so the
+/// application's own name is the right answer: install `NAME.png` into
+/// `/usr/share/icons/hicolor/256x256/apps/` and the menu entry finds it. Without
+/// the key the application appears with a generic placeholder icon.
+fn iconName(name: []const u8) []const u8 {
+    return name;
 }
 
 /// The `name` field of `build.zig.zon`, which is what the project calls itself.
