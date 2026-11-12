@@ -52,6 +52,8 @@ const std = @import("std");
 // --------------------------------------------------------------- core types
 pub const App = @import("app.zig").App;
 pub const AppOptions = @import("app.zig").AppOptions;
+pub const FrontendFile = @import("app.zig").FrontendFile;
+pub const Phase = @import("app.zig").Phase;
 pub const Window = @import("window.zig").Window;
 pub const WindowOptions = @import("window.zig").WindowOptions;
 pub const Rect = @import("window.zig").Rect;

@@ -35,6 +35,7 @@ const log = @import("log.zig");
 const loop = @import("loop.zig");
 const alloc = @import("allocator.zig");
 const paths_mod = @import("utils/paths.zig");
+const env = @import("utils/env.zig");
 const window_mod = @import("window.zig");
 
 pub const Window = window_mod.Window;
@@ -57,7 +58,7 @@ pub const AppOptions = struct {
     single_instance: bool = false,
     /// Enable developer tools: web inspector, verbose logging, live reload
     /// signalling. Release builds default to false.
-    dev: bool = builtin.mode == .Debug,
+    dev: bool = builtin.mode == .debug,
     /// Directory holding the production frontend, as a list of
     /// `embedded`-style name/content pairs, or null when the app has none.
     frontend: ?[]const FrontendFile = null,
@@ -101,8 +102,12 @@ pub const App = struct {
     queue: loop.Queue,
     /// Resolved data directories.
     paths: paths_mod.PathSet,
-    /// The platform backend.
+    /// The platform backend, type erased.
     be: Backend,
+    /// The backend implementation, stored by value inside the App so `be.ctx`
+    /// has a stable address for the app's lifetime. `App` is returned by value
+    /// from `init`, so the address is fixed up once in `run`.
+    be_storage: BackendStorage = undefined,
     /// Options, with strings duplicated into `arena`.
     options: OwnedOptions,
     /// The lifecycle phase.
@@ -206,8 +211,10 @@ pub const App = struct {
         var scratch = alloc.Scratch.init(allocator);
         errdefer scratch.deinit();
 
+        // A per-process secret the page bridge must present, so a page cannot
+        // forge calls on behalf of another window.
         var secret_bytes: [8]u8 = undefined;
-        std.crypto.random.bytes(&secret_bytes);
+        env.secureRandom(&secret_bytes);
         const secret = std.mem.readInt(u64, &secret_bytes, .little);
 
         var self = App{
@@ -216,7 +223,8 @@ pub const App = struct {
             .scratch = scratch,
             .queue = loop.Queue.init(),
             .paths = paths,
-            .be = newBackend(),
+            .be = .{ .ctx = undefined, .vtable = &backend_vtable },
+            .be_storage = newBackend(),
             .options = .{
                 .name = app_name,
                 .app_id = app_id,
@@ -261,14 +269,35 @@ pub const App = struct {
         self.phase = .stopped;
     }
 
-    fn newBackend() Backend {
-        return switch (backend.current) {
-            .linux => @import("platform/linux/backend.zig").BackendImpl{},
-            .windows => @import("platform/windows/backend.zig").BackendImpl{},
-            .macos => @import("platform/macos/backend.zig").BackendImpl{},
-            .testing => @import("platform/testing/backend.zig").BackendImpl{},
+    /// Every backend implementation, present in this build only for the
+    /// selected platform: a union of the one that applies.
+    pub const BackendStorage = switch (backend.current) {
+        .linux => @import("platform/linux/backend.zig").BackendImpl,
+        .windows => @import("platform/windows/backend.zig").BackendImpl,
+        .macos => @import("platform/macos/backend.zig").BackendImpl,
+        .testing => @import("platform/testing/backend.zig").BackendImpl,
+    };
+
+    fn newBackend() BackendStorage {
+        return .{};
+    }
+
+    /// Points `be` at this App's own storage. Called once, before the backend
+    /// initialises, because `App` moves when `init` returns it.
+    fn bindBackend(self: *App) void {
+        self.be = .{
+            .ctx = @ptrCast(&self.be_storage),
+            .vtable = &backend_vtable,
         };
     }
+
+    /// The vtable of the selected backend, resolved at comptime.
+    const backend_vtable = switch (backend.current) {
+        .linux => @import("platform/linux/backend.zig").vtable(),
+        .windows => @import("platform/windows/backend.zig").vtable(),
+        .macos => @import("platform/macos/backend.zig").vtable(),
+        .testing => @import("platform/testing/backend.zig").vtable(),
+    };
 
     /// A type-erased view of the backend.
     pub const Backend = struct {
@@ -280,7 +309,7 @@ pub const App = struct {
             deinit: *const fn (ctx: *anyopaque) void,
             run: *const fn (ctx: *anyopaque) errors.InitError!void,
             quit: *const fn (ctx: *anyopaque) void,
-            create_window: *const fn (ctx: *anyopaque, opts: backend.WindowOptions) errors.WindowError!void,
+            create_window: *const fn (ctx: *anyopaque, id: u32, opts: backend.WindowOptions) errors.WindowError!void,
             destroy_window: *const fn (ctx: *anyopaque, id: u32) void,
             show_window: *const fn (ctx: *anyopaque, id: u32, visible: bool) void,
             focus_window: *const fn (ctx: *anyopaque, id: u32) void,
@@ -332,6 +361,10 @@ pub const App = struct {
         self.main_thread = std.Thread.getCurrentId();
         self.phase = .running;
 
+        // The App moved when `init` returned it, so the backend's context
+        // pointer is bound here, in its final location.
+        self.bindBackend();
+
         self.beInit() catch |e| {
             self.phase = .stopped;
             log.err("backend init failed: {s}", .{errors.name(e)});
@@ -354,11 +387,16 @@ pub const App = struct {
         if (self.exit_code != 0) return error.ExitCode;
     }
 
-    /// Creates the windows and listeners that were queued before `run`.
+    /// Materialises the windows the application created before `run`. They are
+    /// made in creation order so the first one ends up on top.
     fn deferHome(self: *App) void {
-        // Nothing deferred yet: windows created before run are created
-        // immediately by createWindow and shown by the backend once it starts.
-        _ = self;
+        var id: u32 = 1;
+        const last = self.next_id;
+        while (id < last) : (id += 1) {
+            const st = self.windows[id % max_windows] orelse continue;
+            if (!st.pending_native) continue;
+            self.createNativeWindow(id);
+        }
     }
 
     /// Requests that the application quit. Runs before-quit listeners, which
@@ -430,7 +468,7 @@ pub const App = struct {
         state.closable = opts.closable;
 
         var secret_bytes: [8]u8 = undefined;
-        std.crypto.random.bytes(&secret_bytes);
+        env.secureRandom(&secret_bytes);
         state.secret = std.mem.readInt(u64, &secret_bytes, .little);
 
         // Integrate with the parent's id for modality.
@@ -456,44 +494,65 @@ pub const App = struct {
         self.window_count += 1;
         const handle = self.windows[slot].?.handle;
 
+        {
+            const native = self.windows[slot].?.native;
+            _ = &native;
+        }
+        self.windows[slot].?.native = .{
+            .title = self.windows[slot].?.title,
+            .url = self.windows[slot].?.url,
+            .content = state.kind,
+            .width = state.width,
+            .height = state.height,
+            .x = opts.x,
+            .y = opts.y,
+            .min_width = opts.min_width,
+            .min_height = opts.min_height,
+            .max_width = opts.max_width,
+            .max_height = opts.max_height,
+            .hidden = opts.hidden,
+            .frameless = opts.frameless,
+            .resizable = opts.resizable,
+            .movable = opts.movable,
+            .minimizable = opts.minimizable,
+            .maximizable = opts.maximizable,
+            .closable = opts.closable,
+            .fullscreenable = opts.fullscreenable,
+            .always_on_top = opts.always_on_top,
+            .skip_taskbar = opts.skip_taskbar,
+            .transparent = opts.transparent,
+            .maximized = opts.maximized or state.state == .maximized,
+            .fullscreen = opts.fullscreen or state.state == .fullscreen,
+            .background = opts.background,
+            .parent = parent_id,
+            .modal = opts.modal,
+            .secret = state.secret,
+        };
+
         if (self.phase == .running) {
-            self.be.vtable.create_window(self.be.ctx, .{
-                .title = self.windows[slot].?.title,
-                .url = self.windows[slot].?.url,
-                .content = state.kind,
-                .width = state.width,
-                .height = state.height,
-                .x = opts.x,
-                .y = opts.y,
-                .min_width = opts.min_width,
-                .min_height = opts.min_height,
-                .max_width = opts.max_width,
-                .max_height = opts.max_height,
-                .hidden = opts.hidden,
-                .frameless = opts.frameless,
-                .resizable = opts.resizable,
-                .movable = opts.movable,
-                .minimizable = opts.minimizable,
-                .maximizable = opts.maximizable,
-                .closable = opts.closable,
-                .fullscreenable = opts.fullscreenable,
-                .always_on_top = opts.always_on_top,
-                .skip_taskbar = opts.skip_taskbar,
-                .transparent = opts.transparent,
-                .maximized = opts.maximized or state.state == .maximized,
-                .fullscreen = opts.fullscreen or state.state == .fullscreen,
-                .background = opts.background,
-                .parent = parent_id,
-                .modal = opts.modal,
-                .secret = state.secret,
-            }) catch |e| {
-                state.deinit();
-                self.windows[slot] = null;
-                self.window_count -= 1;
-                return e;
-            };
+            self.createNativeWindow(id);
+        } else {
+            // The platform is not up yet; `run` materialises it in order.
+            self.windows[slot].?.pending_native = true;
         }
         return handle;
+    }
+
+    /// Asks the backend to create the native window for an existing framework
+    /// window, and undoes the framework window if the backend refuses.
+    fn createNativeWindow(self: *App, id: u32) void {
+        const slot = id % max_windows;
+        const st = &(self.windows[slot] orelse return);
+        st.pending_native = false;
+        self.be.vtable.create_window(self.be.ctx, id, st.native) catch |e| {
+            log.err("cannot create window {d}: {s}", .{ id, errors.name(e) });
+            const handle = st.handle;
+            st.deinit();
+            self.windows[slot] = null;
+            self.window_count -= 1;
+            _ = handle;
+            return;
+        };
     }
 
     /// Looks up a window's state, or null when the handle is stale.
@@ -604,6 +663,222 @@ pub const App = struct {
     }
 
     // -------------------------------------------------------------- access
+
+    // ----------------------------------------------------------- event sink
+    //
+    // The backend reports native events through this sink. Every callback runs
+    // on the main thread, so the core needs no locks here. Events for windows
+    // the core no longer knows are dropped.
+
+    /// The sink the backend calls. Stable for the app's lifetime.
+    pub fn sink(self: *App) backend.EventSink {
+        return .{ .ctx = self, .vtable = &sink_vtable };
+    }
+
+    const sink_vtable = backend.EventSink.VTable{
+        .ready = onBackendReady,
+        .all_windows_closed = onAllWindowsClosed,
+        .quitting = onBackendQuitting,
+        .activate = onActivate,
+        .deactivate = onDeactivate,
+        .open_url = onOpenUrl,
+        .open_file = onOpenFile,
+        .window_created = onWindowCreated,
+        .window_closed = onWindowClosed,
+        .window_close_requested = onWindowCloseRequested,
+        .window_focus = onWindowFocus,
+        .window_resized = onWindowResized,
+        .window_moved = onWindowMoved,
+        .window_state_changed = onWindowStateChanged,
+        .window_scale_changed = onWindowScaleChanged,
+        .window_theme_changed = onWindowThemeChanged,
+        .web_title_changed = onWebTitleChanged,
+        .web_url_changed = onWebUrlChanged,
+        .web_load_started = onWebLoadStarted,
+        .web_load_finished = onWebLoadFinished,
+        .web_load_failed = onWebLoadFailed,
+        .web_dom_ready = onWebDomReady,
+        .web_message = onWebMessage,
+        .web_console = onWebConsole,
+        .web_navigation_requested = onWebNavigationRequested,
+        .surface_resized = onSurfaceResized,
+        .surface_input = onSurfaceInput,
+        .surface_frame_requested = onSurfaceFrameRequested,
+        .notification_clicked = onNotificationClicked,
+        .tray_clicked = onTrayClicked,
+        .shortcut_pressed = onShortcutPressed,
+        .theme_changed = onThemeChanged,
+        .dispatch = onDispatch,
+    };
+
+    inline fn fromCtx(ctx: *anyopaque) *App {
+        return @ptrCast(@alignCast(ctx));
+    }
+
+    fn onBackendReady(ctx: *anyopaque) void {
+        fromCtx(ctx).emitReady();
+    }
+    fn onAllWindowsClosed(ctx: *anyopaque) void {
+        const self = fromCtx(ctx);
+        if (self.options.quit_on_last_window_closed) self.requestQuit(.last_window);
+    }
+    fn onBackendQuitting(ctx: *anyopaque) void {
+        fromCtx(ctx).requestQuit(.system);
+    }
+    fn onActivate(ctx: *anyopaque) void {
+        _ = ctx;
+    }
+    fn onDeactivate(ctx: *anyopaque) void {
+        _ = ctx;
+    }
+    fn onOpenUrl(ctx: *anyopaque, url: []const u8) void {
+        _ = ctx;
+        log.info("open url: {s}", .{url});
+    }
+    fn onOpenFile(ctx: *anyopaque, path: []const u8) void {
+        _ = ctx;
+        log.info("open file: {s}", .{path});
+    }
+    fn onWindowCreated(ctx: *anyopaque, id: u32) void {
+        const self = fromCtx(ctx);
+        if (self.windowState(.{ .id = id })) |st| {
+            st.visible = true;
+        }
+    }
+    fn onWindowClosed(ctx: *anyopaque, id: u32) void {
+        const self = fromCtx(ctx);
+        self.destroyWindow(.{ .id = id });
+    }
+    fn onWindowCloseRequested(ctx: *anyopaque, id: u32) void {
+        const self = fromCtx(ctx);
+        self.closeWindow(.{ .id = id });
+    }
+    fn onWindowFocus(ctx: *anyopaque, id: u32, focused: bool) void {
+        const self = fromCtx(ctx);
+        const st = self.windowState(.{ .id = id }) orelse return;
+        st.focused = focused;
+        if (focused) {
+            self.focused = st.handle;
+        } else if (self.focused) |f| {
+            if (f.id == id) self.focused = null;
+        }
+        if (st.on_focus) |f| f(st.handle, focused, st.on_focus_ctx);
+    }
+    fn onWindowResized(ctx: *anyopaque, id: u32, width: i32, height: i32) void {
+        const self = fromCtx(ctx);
+        const st = self.windowState(.{ .id = id }) orelse return;
+        st.width = width;
+        st.height = height;
+        if (st.on_resize) |f| f(st.handle, .{ .width = width, .height = height }, st.on_resize_ctx);
+    }
+    fn onWindowMoved(ctx: *anyopaque, id: u32, x: i32, y: i32) void {
+        const self = fromCtx(ctx);
+        const st = self.windowState(.{ .id = id }) orelse return;
+        st.x = x;
+        st.y = y;
+    }
+    fn onWindowStateChanged(ctx: *anyopaque, id: u32, state: events.WindowState) void {
+        const self = fromCtx(ctx);
+        const st = self.windowState(.{ .id = id }) orelse return;
+        st.state = state;
+    }
+    fn onWindowScaleChanged(ctx: *anyopaque, id: u32, scale: f32) void {
+        const self = fromCtx(ctx);
+        const st = self.windowState(.{ .id = id }) orelse return;
+        st.scale = scale;
+    }
+    fn onWindowThemeChanged(ctx: *anyopaque, id: u32, theme: events.Theme) void {
+        const self = fromCtx(ctx);
+        const st = self.windowState(.{ .id = id }) orelse return;
+        st.theme = theme;
+    }
+    fn onWebTitleChanged(ctx: *anyopaque, id: u32, title: []const u8) void {
+        const self = fromCtx(ctx);
+        const st = self.windowState(.{ .id = id }) orelse return;
+        if (st.on_title_changed) |f| f(st.handle, title, st.on_title_changed_ctx);
+    }
+    fn onWebUrlChanged(ctx: *anyopaque, id: u32, url: []const u8) void {
+        _ = ctx;
+        _ = id;
+        _ = url;
+    }
+    fn onWebLoadStarted(ctx: *anyopaque, id: u32) void {
+        const self = fromCtx(ctx);
+        if (self.windowState(.{ .id = id })) |st| st.dom_ready = false;
+    }
+    fn onWebLoadFinished(ctx: *anyopaque, id: u32) void {
+        const self = fromCtx(ctx);
+        const st = self.windowState(.{ .id = id }) orelse return;
+        if (st.on_load_finished) |f| f(st.handle, st.on_load_finished_ctx);
+    }
+    fn onWebLoadFailed(ctx: *anyopaque, id: u32, reason: []const u8) void {
+        _ = ctx;
+        log.err("page load failed in window {d}: {s}", .{ id, reason });
+    }
+    fn onWebDomReady(ctx: *anyopaque, id: u32) void {
+        const self = fromCtx(ctx);
+        if (self.windowState(.{ .id = id })) |st| st.dom_ready = true;
+    }
+    fn onWebMessage(ctx: *anyopaque, id: u32, message: []const u8) void {
+        _ = ctx;
+        _ = id;
+        _ = message;
+    }
+    fn onWebConsole(ctx: *anyopaque, id: u32, level: events.ConsoleLevel, text: []const u8) void {
+        _ = ctx;
+        _ = level;
+        log.debug("console[{d}]: {s}", .{ id, text });
+    }
+    fn onWebNavigationRequested(ctx: *anyopaque, id: u32, url: []const u8) bool {
+        _ = ctx;
+        _ = id;
+        _ = url;
+        return true;
+    }
+    fn onSurfaceResized(ctx: *anyopaque, id: u32, width: i32, height: i32, scale: f32) void {
+        const self = fromCtx(ctx);
+        const st = self.windowState(.{ .id = id }) orelse return;
+        st.width = width;
+        st.height = height;
+        st.scale = scale;
+    }
+    fn onSurfaceInput(ctx: *anyopaque, id: u32, input: events.Input) void {
+        _ = ctx;
+        _ = id;
+        _ = input;
+    }
+    fn onSurfaceFrameRequested(ctx: *anyopaque, id: u32) void {
+        _ = ctx;
+        _ = id;
+    }
+    fn onNotificationClicked(ctx: *anyopaque, tag: []const u8) void {
+        _ = ctx;
+        _ = tag;
+    }
+    fn onTrayClicked(ctx: *anyopaque, item: u32) void {
+        _ = ctx;
+        _ = item;
+    }
+    fn onShortcutPressed(ctx: *anyopaque, accel: []const u8) void {
+        _ = ctx;
+        _ = accel;
+    }
+    fn onThemeChanged(ctx: *anyopaque, theme: events.Theme) void {
+        fromCtx(ctx).theme = theme;
+    }
+    fn onDispatch(ctx: *anyopaque) void {
+        _ = fromCtx(ctx).queue.drain();
+    }
+
+    /// Looks up a file in the application's embedded frontend by its path
+    /// relative to the bundle root. Returns null when the app has no frontend
+    /// or the path is unknown.
+    pub fn frontendFile(self: *const App, path: []const u8) ?FrontendFile {
+        for (self.options.frontend) |f| {
+            if (std.mem.eql(u8, f.path, path)) return f;
+        }
+        return null;
+    }
 
     pub fn name(self: *const App) []const u8 {
         return self.options.name;

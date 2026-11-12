@@ -23,8 +23,8 @@ fn run(ctx: *anyopaque) errors.InitError!void {
     return errors.InitError.PlatformUnavailable;
 }
 fn quit(ctx: *anyopaque) void { _ = ctx; }
-fn createWindow(ctx: *anyopaque, opts: backend.WindowOptions) errors.WindowError!void {
-    _ = ctx; _ = opts;
+fn createWindow(ctx: *anyopaque, id: u32, opts: backend.WindowOptions) errors.WindowError!void {
+    _ = ctx; _ = id; _ = opts;
     return errors.WindowError.NotSupported;
 }
 fn destroyWindow(ctx: *anyopaque, id: u32) void { _ = ctx; _ = id; }

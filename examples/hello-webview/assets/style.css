@@ -1,0 +1,14 @@
+:root { color-scheme: light dark; }
+body {
+  margin: 0;
+  font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  background: Canvas;
+  color: CanvasText;
+}
+main { max-width: 40rem; padding: 2rem; }
+h1 { font-size: 1.9rem; margin: 0 0 1rem; letter-spacing: -0.02em; }
+p { margin: 0 0 0.75rem; }
+.bridge { font-variant-numeric: tabular-nums; opacity: 0.75; }

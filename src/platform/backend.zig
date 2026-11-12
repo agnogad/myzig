@@ -40,7 +40,16 @@ pub const Backend = enum {
 /// The backend compiled for the current target. There is no fallback: a build
 /// for an unsupported OS fails to compile, which is honest, rather than
 /// succeeding and failing at run time.
+///
+/// A test build can select `testing` through the `myzig_backend` build option,
+/// which is how the framework's own tests run with no display attached.
 pub const current: Backend = blk: {
+    if (@hasDecl(@import("myzig_options"), "backend")) {
+        const name = @import("myzig_options").backend;
+        break :blk std.meta.stringToEnum(Backend, name) orelse @compileError(
+            "unknown myzig_backend: " ++ name,
+        );
+    }
     const builtin = @import("builtin");
     break :blk switch (builtin.os.tag) {
         .linux => .linux,
@@ -48,7 +57,7 @@ pub const current: Backend = blk: {
         .macos => .macos,
         else => @compileError(
             "MyZig supports Linux, Windows and macOS. " ++
-                "For unit tests on other hosts, import myzig.platform.testing directly.",
+                "For unit tests on other hosts, pass -Dmyzig_backend=testing.",
         ),
     };
 };

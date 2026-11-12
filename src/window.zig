@@ -146,6 +146,15 @@ pub const WindowState = struct {
     /// Per-window secret mixed into page -> Zig messages.
     secret: u64 = 0,
 
+    /// True while the window exists in the framework but the backend has not
+    /// made a native window yet: windows created before `App.run` are
+    /// materialised once the platform is up.
+    pending_native: bool = false,
+
+    /// Options that only the backend needs, kept so a deferred window can be
+    /// created later with exactly what the caller asked for.
+    native: backend.WindowOptions = .{},
+
     on_close: ?*const fn (w: Window, ctx: ?*anyopaque) void = null,
     on_close_ctx: ?*anyopaque = null,
     on_focus: ?*const fn (w: Window, focused: bool, ctx: ?*anyopaque) void = null,

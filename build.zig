@@ -4,6 +4,17 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // Backend selection. Empty means "choose from the target OS". A test build
+    // passes `testing` so the framework runs with no display attached.
+    const backend_opt = b.option(
+        []const u8,
+        "myzig_backend",
+        "Platform backend: linux, windows, macos or testing (default: from target OS)",
+    );
+
+    const options = b.addOptions();
+    if (backend_opt) |name| options.addOption([]const u8, "backend", name);
+
     // ---------------------------------------------------------------- module
     // `myzig` is the framework module application code imports.
     const myzig = b.addModule("myzig", .{
@@ -12,6 +23,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .link_libc = true,
     });
+    myzig.addOptions("myzig_options", options);
     configureNative(myzig, target);
 
     // ----------------------------------------------------------- examples
@@ -58,6 +70,7 @@ pub fn build(b: *std.Build) void {
             .imports = &.{.{ .name = "myzig", .module = myzig }},
         }),
     });
+    cli_exe.root_module.addOptions("myzig_options", options);
     cli_exe.root_module.link_libc = true;
     b.installArtifact(cli_exe);
 
@@ -68,6 +81,9 @@ pub fn build(b: *std.Build) void {
     // ---------------------------------------------------------------- tests
     const test_step = b.step("test", "Run all unit and integration tests");
 
+    const test_options = b.addOptions();
+    test_options.addOption([]const u8, "backend", "testing");
+
     const unit_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/myzig.zig"),
@@ -75,6 +91,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+    unit_tests.root_module.addOptions("myzig_options", test_options);
     configureNative(unit_tests.root_module, target);
     const run_unit = b.addRunArtifact(unit_tests);
     run_unit.has_side_effects = true;
@@ -89,6 +106,7 @@ pub fn build(b: *std.Build) void {
             .imports = &.{.{ .name = "myzig", .module = myzig }},
         }),
     });
+    integration_tests.root_module.addOptions("myzig_options", test_options);
     configureNative(integration_tests.root_module, target);
     const run_integration = b.addRunArtifact(integration_tests);
     run_integration.has_side_effects = true;
@@ -102,6 +120,7 @@ pub fn build(b: *std.Build) void {
             .imports = &.{.{ .name = "myzig", .module = myzig }},
         }),
     });
+    cli_tests.root_module.addOptions("myzig_options", test_options);
     const run_cli_tests = b.addRunArtifact(cli_tests);
     test_step.dependOn(&run_cli_tests.step);
 
@@ -115,6 +134,7 @@ pub fn build(b: *std.Build) void {
             .imports = &.{.{ .name = "myzig", .module = myzig }},
         }),
     });
+    bench_exe.root_module.addOptions("myzig_options", options);
     configureNative(bench_exe.root_module, target);
     const run_bench = b.addRunArtifact(bench_exe);
     const bench_step = b.step("bench", "Run performance benchmarks");

@@ -93,14 +93,23 @@ fn writeStderr(a: []const u8, b: []const u8, c: []const u8, d: []const u8, e: []
         std.debug.print("{s}{s}{s}{s}{s}", .{ a, b, c, d, e });
         return;
     }
-    var iov = [_]std.posix.iovec_const{
-        .{ .base = a.ptr, .len = a.len },
-        .{ .base = b.ptr, .len = b.len },
-        .{ .base = c.ptr, .len = c.len },
-        .{ .base = d.ptr, .len = d.len },
-        .{ .base = e.ptr, .len = e.len },
-    };
-    _ = std.posix.writev(std.posix.STDERR_FILENO, &iov) catch {};
+    // One `write` per fragment, to a pipe or tty: this is a diagnostic path
+    // that must not allocate or pull in a buffered writer, and the loop keeps
+    // a short write from truncating the line.
+    writeAll(2, a);
+    writeAll(2, b);
+    writeAll(2, c);
+    writeAll(2, d);
+    writeAll(2, e);
+}
+
+fn writeAll(fd: std.c.fd_t, bytes: []const u8) void {
+    var rest = bytes;
+    while (rest.len > 0) {
+        const n = std.c.write(fd, rest.ptr, rest.len);
+        if (n <= 0) return;
+        rest = rest[@intCast(n)..];
+    }
 }
 
 test "level parsing" {

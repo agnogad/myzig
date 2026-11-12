@@ -12,16 +12,28 @@
 const std = @import("std");
 const errors = @import("../../errors.zig");
 const log = @import("../../log.zig");
+const env = @import("../../utils/env.zig");
 
 // ---------------------------------------------------------------- C types
 
 pub const GBytes = *anyopaque;
 pub const gboolean = c_int;
 pub const guint = c_uint;
+/// `G_PRIORITY_DEFAULT_IDLE`: run when nothing more urgent is pending.
+pub const G_PRIORITY_DEFAULT_IDLE: c_int = 200;
 pub const gint = c_int;
 pub const gulong = c_ulong;
-pub const gpointer = ?*anyopaque;
+pub const gpointer = *anyopaque;
 pub const GError = opaque {};
+
+/// A `GError` as the C ABI lays it out, for the rare call that needs to build
+/// one. MyZig only ever *creates* an error to fail a scheme request, so the
+/// fields it does not set stay null.
+pub const GErrorFull = extern struct {
+    domain: u32,
+    code: c_int,
+    message: ?[*:0]u8,
+};
 pub const GCancellable = opaque {};
 pub const GMainLoop = ?*anyopaque;
 pub const GMainContext = ?*anyopaque;
@@ -35,8 +47,9 @@ pub const GdkMonitor = *anyopaque;
 pub const GdkScreen = *anyopaque;
 pub const GdkPixbuf = *anyopaque;
 pub const WebKitWebView = *anyopaque;
-pub const WebKitUserContentManager = *anyopaque;
+pub const WebKitWebInspector = *anyopaque;
 pub const WebKitUserScript = *anyopaque;
+pub const WebKitUserContentManager = *anyopaque;
 pub const WebKitUserContentInjectedFrames = c_int;
 pub const WebKitUserScriptInjectionTime = c_int;
 pub const GtkWidgetPath = *anyopaque;
@@ -66,6 +79,7 @@ const abi = if (@import("builtin").os.tag == .windows) std.DynLib else std.c;
 var lib_glib: ?std.DynLib = null;
 var lib_gobject: ?std.DynLib = null;
 var lib_gtk: ?std.DynLib = null;
+var lib_gio: ?std.DynLib = null;
 var lib_gdk: ?std.DynLib = null;
 var lib_webkit: ?std.DynLib = null;
 var webkit_version: enum { none, v4_0, v4_1 } = .none;
@@ -96,12 +110,12 @@ fn mustResolve(lib: *std.DynLib, comptime T: type, comptime name: [:0]const u8) 
 }
 
 // --------------------------------------------------------------- symbol table
-pub const GSFunc = ?*const fn (gpointer) callconv(.c) gboolean;
+pub const GSFunc = ?*const fn (?gpointer) callconv(.c) gboolean;
 
 
 // GLib
 pub var g_set_prgname: *const fn (name: [*:0]const u8) callconv(.c) void = undefined;
-pub var g_idle_add_full: *const fn (priority: c_int, func: GSFunc, data: gpointer, notify: ?*const fn (gpointer) callconv(.c) void) callconv(.c) guint = undefined;
+pub var g_idle_add_full: *const fn (priority: c_int, func: GSFunc, data: ?gpointer, notify: ?*const fn (?gpointer) callconv(.c) void) callconv(.c) guint = undefined;
 pub var g_main_context_iteration: *const fn (ctx: GMainContext, may_block: gboolean) callconv(.c) gboolean = undefined;
 pub var g_main_context_wakeup: *const fn (ctx: GMainContext) callconv(.c) void = undefined;
 pub var g_main_loop_new: *const fn (ctx: GMainContext, is_running: gboolean) callconv(.c) GMainLoop = undefined;
@@ -109,29 +123,35 @@ pub var g_main_loop_run: *const fn (loop: GMainLoop) callconv(.c) void = undefin
 pub var g_main_loop_quit: *const fn (loop: GMainLoop) callconv(.c) void = undefined;
 pub var g_main_loop_unref: *const fn (loop: GMainLoop) callconv(.c) void = undefined;
 pub var g_error_free: *const fn (err: *GError) callconv(.c) void = undefined;
-pub var g_free: *const fn (p: gpointer) callconv(.c) void = undefined;
+pub var g_free: *const fn (p: ?gpointer) callconv(.c) void = undefined;
+pub var g_memory_input_stream_new_from_bytes: *const fn (bytes: ?gpointer) callconv(.c) ?gpointer = undefined;
+pub var g_bytes_new_static: *const fn (data: ?*const anyopaque, size: usize) callconv(.c) ?gpointer = undefined;
+pub var g_bytes_unref: *const fn (b: ?gpointer) callconv(.c) void = undefined;
+pub var g_quark_from_static_string: *const fn (s: [*:0]const u8) callconv(.c) u32 = undefined;
 pub var g_strfreev: *const fn (v: ?[*]?[*:0]u8) callconv(.c) void = undefined;
-pub var g_timeout_add: *const fn (ms: guint, func: GSFunc, data: gpointer) callconv(.c) guint = undefined;
+pub var g_timeout_add: *const fn (ms: guint, func: GSFunc, data: ?gpointer) callconv(.c) guint = undefined;
 pub var g_source_remove: *const fn (id: guint) callconv(.c) gboolean = undefined;
 pub var g_get_monotonic_time: *const fn () callconv(.c) i64 = undefined;
 pub var g_get_prgname: *const fn () callconv(.c) ?[*:0]const u8 = undefined;
-pub var g_unix_signal_add: *const fn (signum: c_int, func: GSFunc, data: gpointer) callconv(.c) guint = undefined;
+pub var g_unix_signal_add: *const fn (signum: c_int, func: GSFunc, data: ?gpointer) callconv(.c) guint = undefined;
 
 // GObject
-pub var g_signal_connect_data: *const fn (obj: gpointer, signal: [*:0]const u8, cb: ?*const anyopaque, data: gpointer, destroy: ?*const anyopaque, flags: c_int) callconv(.c) gulong = undefined;
+pub var g_signal_connect_data: *const fn (obj: ?gpointer, signal: [*:0]const u8, cb: ?*const anyopaque, data: ?gpointer, destroy: ?*const anyopaque, flags: c_int) callconv(.c) gulong = undefined;
 pub var g_signal_handler_disconnect: *const fn (obj: gpointer, id: gulong) callconv(.c) void = undefined;
 pub var g_object_ref: *const fn (obj: gpointer) callconv(.c) gpointer = undefined;
 pub var g_object_ref_sink: *const fn (obj: gpointer) callconv(.c) gpointer = undefined;
 pub var g_object_unref: *const fn (obj: gpointer) callconv(.c) void = undefined;
-pub var g_object_set_int: *const fn (obj: gpointer, first: [*:0]const u8) callconv(.c) void = undefined;
-pub var g_object_set_string: *const fn (obj: gpointer, first: [*:0]const u8, value: [*:0]const u8, term: gpointer) callconv(.c) void = undefined;
-pub var g_object_set_bool: *const fn (obj: gpointer, first: [*:0]const u8, value: gboolean, term: gpointer) callconv(.c) void = undefined;
-pub var g_object_get_int: *const fn (obj: gpointer, first: [*:0]const u8, out: *c_int, term: gpointer) callconv(.c) void = undefined;
-pub var g_object_get_str: *const fn (obj: gpointer, first: [*:0]const u8, out: *?[*:0]u8, term: gpointer) callconv(.c) void = undefined;
+/// `g_object_get(obj, first_property, ..., NULL)`: variadic, terminated by
+/// NULL. Callers pass property names and out-pointers matching the property's
+/// type, exactly as in C.
+pub var g_object_get: *const fn (obj: gpointer, first: [*:0]const u8, ...) callconv(.c) void = undefined;
+/// `g_object_set(obj, first_property, ..., NULL)`: variadic, terminated by
+/// NULL.
+pub var g_object_set: *const fn (obj: gpointer, first: [*:0]const u8, ...) callconv(.c) void = undefined;
 
 // GTK
 pub var gtk_init_check: *const fn (argc: *c_int, argv: *[*c][*c]u8) callconv(.c) gboolean = undefined;
-pub var gtk_window_new: *const fn (type: c_int) callconv(.c) GtkWindow = undefined;
+pub var gtk_window_new: *const fn (type: c_int) callconv(.c) ?GtkWindow = undefined;
 pub var gtk_window_set_title: *const fn (w: GtkWindow, title: [*:0]const u8) callconv(.c) void = undefined;
 pub var gtk_window_get_title: *const fn (w: GtkWindow) callconv(.c) ?[*:0]const u8 = undefined;
 pub var gtk_window_set_default_size: *const fn (w: GtkWindow, width: gint, height: gint) callconv(.c) void = undefined;
@@ -168,7 +188,7 @@ pub var gtk_box_new: *const fn (orientation: c_int, spacing: gint) callconv(.c) 
 pub var gtk_container_add: *const fn (c: GtkContainer, child: GtkWidget) callconv(.c) void = undefined;
 pub var gtk_container_remove: *const fn (c: GtkContainer, child: GtkWidget) callconv(.c) void = undefined;
 pub var gtk_window_set_default_icon_from_file: *const fn (f: [*:0]const u8, err: *?*GError) callconv(.c) gboolean = undefined;
-pub var gtk_settings_get_default: *const fn () callconv(.c) gpointer = undefined;
+pub var gtk_settings_get_default: *const fn () callconv(.c) ?gpointer = undefined;
 pub var gtk_style_context_new: *const fn () callconv(.c) gpointer = undefined;
 pub var gtk_clipboard_get: *const fn (sel: gpointer) callconv(.c) gpointer = undefined;
 pub var gtk_clipboard_set_text: *const fn (cb: gpointer, text: [*:0]const u8, len: gint) callconv(.c) void = undefined;
@@ -180,14 +200,12 @@ pub var gtk_events_pending: *const fn () callconv(.c) gboolean = undefined;
 
 // GDK
 pub var gdk_atom_intern: *const fn (name: [*:0]const u8, only_if_exists: gboolean) callconv(.c) gpointer = undefined;
-pub var gdk_default_root_window: *const fn () callconv(.c) GdkWindow = undefined;
-pub var gdk_display_get_default: *const fn () callconv(.c) GdkDisplay = undefined;
+pub var gdk_display_get_default: *const fn () callconv(.c) ?GdkDisplay = undefined;
 pub var gdk_display_get_name: *const fn (d: GdkDisplay) callconv(.c) [*:0]const u8 = undefined;
 pub var gdk_display_get_default_screen: *const fn (d: GdkDisplay) callconv(.c) GdkScreen = undefined;
 pub var gdk_display_get_n_monitors: *const fn (d: GdkDisplay) callconv(.c) gint = undefined;
-pub var gdk_display_get_monitor: *const fn (d: GdkDisplay, i: gint) callconv(.c) GdkMonitor = undefined;
-pub var gdk_display_get_primary_monitor: *const fn (d: GdkDisplay) callconv(.c) GdkMonitor = undefined;
-pub var gdk_display_set_cursor: *const fn (d: GdkDisplay, name: [*:0]const u8) callconv(.c) void = undefined;
+pub var gdk_display_get_monitor: *const fn (d: GdkDisplay, i: gint) callconv(.c) ?GdkMonitor = undefined;
+pub var gdk_display_get_primary_monitor: *const fn (d: GdkDisplay) callconv(.c) ?GdkMonitor = undefined;
 pub var gdk_monitor_get_geometry: *const fn (m: GdkMonitor, g: *GdkRectangle) callconv(.c) void = undefined;
 pub var gdk_monitor_get_workarea: *const fn (m: GdkMonitor, a: *GdkRectangle) callconv(.c) void = undefined;
 pub var gdk_monitor_get_scale_factor: *const fn (m: GdkMonitor) callconv(.c) gint = undefined;
@@ -205,15 +223,16 @@ pub var gdk_wayland_display_get_type: *const fn () callconv(.c) usize = undefine
 pub var gdk_x11_display_get_type: *const fn () callconv(.c) usize = undefined;
 
 // WebKitGTK
-pub var webkit_web_view_new_with_user_content_manager: *const fn (ucm: WebKitUserContentManager) callconv(.c) WebKitWebView = undefined;
-pub var webkit_user_content_manager_new: *const fn () callconv(.c) WebKitUserContentManager = undefined;
+pub var webkit_web_view_new_with_user_content_manager: *const fn (ucm: WebKitUserContentManager) callconv(.c) ?WebKitWebView = undefined;
+pub var webkit_user_content_manager_new: *const fn () callconv(.c) ?WebKitUserContentManager = undefined;
 pub var webkit_user_content_manager_register_script_message_handler: *const fn (ucm: WebKitUserContentManager, name: [*:0]const u8) callconv(.c) gboolean = undefined;
 pub var webkit_user_content_manager_add_script: *const fn (ucm: WebKitUserContentManager, script: WebKitUserScript) callconv(.c) void = undefined;
-pub var webkit_user_script_new: *const fn (source: [*:0]const u8, frames: WebKitUserContentInjectedFrames, time: WebKitUserScriptInjectionTime, allow_list: ?*anyopaque, block_list: ?*anyopaque) callconv(.c) WebKitUserScript = undefined;
+pub var webkit_user_script_unref: *const fn (sc: WebKitUserScript) callconv(.c) void = undefined;
+pub var webkit_user_script_new: *const fn (source: [*:0]const u8, frames: WebKitUserContentInjectedFrames, time: WebKitUserScriptInjectionTime, allow_list: ?*anyopaque, block_list: ?*anyopaque) callconv(.c) ?WebKitUserScript = undefined;
 pub var webkit_web_view_load_uri: *const fn (w: WebKitWebView, uri: [*:0]const u8) callconv(.c) void = undefined;
 pub var webkit_web_view_load_html: *const fn (w: WebKitWebView, content: [*:0]const u8, base_uri: ?[*:0]const u8) callconv(.c) void = undefined;
-pub var webkit_web_view_run_javascript: *const fn (w: WebKitWebView, script: [*:0]const u8, cancel: ?*GCancellable, cb: ?*const anyopaque, data: gpointer) callconv(.c) void = undefined;
-pub var webkit_web_view_call_async_javascript_function: *const fn (w: WebKitWebView, body: [*:0]const u8, len: c_long, args: ?*anyopaque, world: ?[*:0]const u8, source_uri: ?[*:0]const u8, cancel: ?*GCancellable, cb: ?*const anyopaque, data: gpointer) callconv(.c) void = undefined;
+pub var webkit_web_view_run_javascript: *const fn (w: WebKitWebView, script: [*:0]const u8, cancel: ?*GCancellable, cb: ?*const anyopaque, data: ?gpointer) callconv(.c) void = undefined;
+pub var webkit_web_view_call_async_javascript_function: *const fn (w: WebKitWebView, body: [*:0]const u8, len: c_long, args: ?*anyopaque, world: ?[*:0]const u8, source_uri: ?[*:0]const u8, cancel: ?*GCancellable, cb: ?*const anyopaque, data: ?gpointer) callconv(.c) void = undefined;
 pub var webkit_web_view_get_title: *const fn (w: WebKitWebView) callconv(.c) ?[*:0]u8 = undefined;
 pub var webkit_web_view_get_uri: *const fn (w: WebKitWebView) callconv(.c) ?[*:0]u8 = undefined;
 pub var webkit_web_view_reload: *const fn (w: WebKitWebView) callconv(.c) void = undefined;
@@ -224,7 +243,7 @@ pub var webkit_web_view_can_go_forward: *const fn (w: WebKitWebView) callconv(.c
 pub var webkit_web_view_set_background_color: *const fn (w: WebKitWebView, color: *const GdkRGBA) callconv(.c) void = undefined;
 pub var webkit_web_view_set_zoom_level: *const fn (w: WebKitWebView, z: f64) callconv(.c) void = undefined;
 pub var webkit_web_view_get_zoom_level: *const fn (w: WebKitWebView) callconv(.c) f64 = undefined;
-pub var webkit_web_view_get_settings: *const fn (w: WebKitWebView) callconv(.c) gpointer = undefined;
+pub var webkit_web_view_get_settings: *const fn (w: WebKitWebView) callconv(.c) ?gpointer = undefined;
 pub var webkit_web_view_get_user_content_manager: *const fn (w: WebKitWebView) callconv(.c) WebKitUserContentManager = undefined;
 pub var webkit_settings_set_enable_developer_extras: *const fn (s: gpointer, v: gboolean) callconv(.c) void = undefined;
 pub var webkit_settings_set_enable_javascript: *const fn (s: gpointer, v: gboolean) callconv(.c) void = undefined;
@@ -234,21 +253,23 @@ pub var webkit_settings_set_hardware_acceleration_policy: *const fn (s: gpointer
 pub var webkit_settings_set_user_agent: *const fn (s: gpointer, ua: ?[*:0]const u8) callconv(.c) void = undefined;
 pub var webkit_security_manager_register_uri_scheme_as_cors_enabled: *const fn (sm: gpointer, scheme: [*:0]const u8) callconv(.c) void = undefined;
 pub var webkit_security_manager_register_uri_scheme_as_secure: *const fn (sm: gpointer, scheme: [*:0]const u8) callconv(.c) void = undefined;
-pub var webkit_security_manager_get_singleton: *const fn () callconv(.c) gpointer = undefined;
 pub var webkit_uri_scheme_request_get_uri: *const fn (r: gpointer) callconv(.c) ?[*:0]const u8 = undefined;
 pub var webkit_uri_scheme_request_get_path: *const fn (r: gpointer) callconv(.c) ?[*:0]const u8 = undefined;
 pub var webkit_uri_scheme_request_get_http_method: *const fn (r: gpointer) callconv(.c) ?[*:0]const u8 = undefined;
 pub var webkit_uri_scheme_request_finish: *const fn (r: gpointer, stream: gpointer, len: i64, mime: [*:0]const u8) callconv(.c) void = undefined;
-pub var webkit_uri_scheme_request_finish_error: *const fn (r: gpointer, err: *GError) callconv(.c) void = undefined;
-pub var webkit_web_context_register_uri_scheme: *const fn (ctx: gpointer, scheme: [*:0]const u8, cb: ?*const anyopaque, data: gpointer, destroy: ?*const anyopaque) callconv(.c) void = undefined;
-pub var webkit_web_context_get_default: *const fn () callconv(.c) gpointer = undefined;
+pub var webkit_uri_scheme_request_finish_error: *const fn (r: gpointer, err: *GErrorFull) callconv(.c) void = undefined;
+pub var webkit_web_context_get_security_manager: *const fn (ctx: gpointer) callconv(.c) ?gpointer = undefined;
+pub var webkit_web_context_register_uri_scheme: *const fn (ctx: gpointer, scheme: [*:0]const u8, cb: ?*const anyopaque, data: ?gpointer, destroy: ?*const anyopaque) callconv(.c) void = undefined;
+pub var webkit_web_context_get_default: *const fn () callconv(.c) ?gpointer = undefined;
 pub var webkit_web_context_set_cache_model: *const fn (ctx: gpointer, model: c_int) callconv(.c) void = undefined;
 pub var webkit_web_context_clear_cache: *const fn (ctx: gpointer) callconv(.c) void = undefined;
 pub var webkit_web_view_terminate_web_process: *const fn (w: WebKitWebView) callconv(.c) void = undefined;
 pub var webkit_web_view_get_estimated_load_progress: *const fn (w: WebKitWebView) callconv(.c) f64 = undefined;
-pub var webkit_web_view_inspector_open: *const fn (w: WebKitWebView) callconv(.c) gpointer = undefined;
-pub var webkit_web_view_is_inspector_open: *const fn (w: WebKitWebView) callconv(.c) gboolean = undefined;
-pub var webkit_navigation_action_get_request: *const fn (a: gpointer) callconv(.c) gpointer = undefined;
+pub var webkit_web_inspector_show: *const fn (i: WebKitWebInspector) callconv(.c) void = undefined;
+pub var webkit_web_view_get_inspector: *const fn (w: WebKitWebView) callconv(.c) ?WebKitWebInspector = undefined;
+pub var webkit_navigation_action_get_request: *const fn (a: gpointer) callconv(.c) ?gpointer = undefined;
+pub var webkit_policy_decision_ignore: *const fn (d: gpointer) callconv(.c) void = undefined;
+pub var webkit_navigation_policy_decision_get_navigation_action: *const fn (d: gpointer) callconv(.c) ?gpointer = undefined;
 pub var webkit_uri_request_get_uri: *const fn (r: gpointer) callconv(.c) ?[*:0]const u8 = undefined;
 pub var webkit_navigation_action_is_user_gesture: *const fn (a: gpointer) callconv(.c) gboolean = undefined;
 pub var webkit_web_view_load_bytes: *const fn (w: WebKitWebView, bytes: GBytes, mime: ?[*:0]const u8, enc: ?[*:0]const u8, base: ?[*:0]const u8) callconv(.c) void = undefined;
@@ -267,16 +288,20 @@ pub fn load() errors.InitError!void {
     errdefer gdk.close();
     var gtk = openLib(&.{"libgtk-3.so.0"}) orelse return errors.InitError.LibraryMissing;
     errdefer gtk.close();
+    var gio = openLib(&.{"libgio-2.0.so.0"}) orelse return errors.InitError.LibraryMissing;
+    errdefer gio.close();
 
     try bindAll(&glib, glib_syms);
     try bindAll(&gobject, gobject_syms);
     try bindAll(&gdk, gdk_syms);
     try bindAll(&gtk, gtk_syms);
+    try bindAll(&gio, gio_syms);
 
     lib_glib = glib;
     lib_gobject = gobject;
     lib_gdk = gdk;
     lib_gtk = gtk;
+    lib_gio = gio;
     loaded = true;
 }
 
@@ -336,12 +361,17 @@ pub fn webkitVersionName() []const u8 {
     };
 }
 
-fn bindAll(comptime lib: *std.DynLib, comptime syms: anytype) errors.InitError!void {
-    inline for (syms) |s| {
-        @field(@This(), s[0]) = lib.lookup(@TypeOf(@field(@This(), s[0])), s[1]) orelse {
-            log.err("symbol missing: {s}", .{s[1]});
+/// Resolves every symbol in `syms` into the module-level variable of the same
+/// name. `syms` is a comptime tuple of `.{ zig_name, c_name }` pairs; the Zig
+/// name must be a declaration here, which is checked at compile time, so a
+/// renamed C function cannot silently bind to the wrong pointer type.
+fn bindAll(lib: *std.DynLib, comptime syms: anytype) errors.InitError!void {
+    inline for (syms) |pair| {
+        const value = lib.lookup(@TypeOf(@field(@This(), pair[0])), pair[1]) orelse {
+            log.err("symbol missing: {s}", .{pair[1]});
             return errors.InitError.SymbolMissing;
         };
+        @field(@This(), pair[0]) = value;
     }
 }
 
@@ -356,11 +386,15 @@ const glib_syms = .{
     .{ "g_main_loop_unref", "g_main_loop_unref" },
     .{ "g_error_free", "g_error_free" },
     .{ "g_free", "g_free" },
+    .{ "g_bytes_new_static", "g_bytes_new_static" },
+    .{ "g_bytes_unref", "g_bytes_unref" },
+    .{ "g_quark_from_static_string", "g_quark_from_static_string" },
     .{ "g_strfreev", "g_strfreev" },
     .{ "g_timeout_add", "g_timeout_add" },
     .{ "g_source_remove", "g_source_remove" },
     .{ "g_get_monotonic_time", "g_get_monotonic_time" },
     .{ "g_unix_signal_add", "g_unix_signal_add" },
+    .{ "g_get_prgname", "g_get_prgname" },
 };
 
 const gobject_syms = .{
@@ -369,6 +403,14 @@ const gobject_syms = .{
     .{ "g_object_ref", "g_object_ref" },
     .{ "g_object_ref_sink", "g_object_ref_sink" },
     .{ "g_object_unref", "g_object_unref" },
+    .{ "g_object_get", "g_object_get" },
+    .{ "g_object_set", "g_object_set" },
+};
+
+/// `libgio-2.0` provides the stream types. Kept apart from GLib so a missing
+/// GIO is reported as such.
+const gio_syms = .{
+    .{ "g_memory_input_stream_new_from_bytes", "g_memory_input_stream_new_from_bytes" },
 };
 
 const gdk_syms = .{
@@ -378,7 +420,6 @@ const gdk_syms = .{
     .{ "gdk_display_get_n_monitors", "gdk_display_get_n_monitors" },
     .{ "gdk_display_get_monitor", "gdk_display_get_monitor" },
     .{ "gdk_display_get_primary_monitor", "gdk_display_get_primary_monitor" },
-    .{ "gdk_display_set_cursor", "gdk_display_set_cursor" },
     .{ "gdk_monitor_get_geometry", "gdk_monitor_get_geometry" },
     .{ "gdk_monitor_get_workarea", "gdk_monitor_get_workarea" },
     .{ "gdk_monitor_get_scale_factor", "gdk_monitor_get_scale_factor" },
@@ -387,6 +428,14 @@ const gdk_syms = .{
     .{ "gdk_screen_get_default", "gdk_screen_get_default" },
     .{ "gdk_screen_is_composited", "gdk_screen_is_composited" },
     .{ "gdk_window_get_frame_extents", "gdk_window_get_frame_extents" },
+    .{ "gdk_atom_intern", "gdk_atom_intern" },
+    .{ "gdk_cairo_set_source_rgba", "gdk_cairo_set_source_rgba" },
+    .{ "gdk_screen_get_resolution", "gdk_screen_get_resolution" },
+    .{ "gdk_screen_get_rgba_visual", "gdk_screen_get_rgba_visual" },
+    .{ "gdk_wayland_display_get_type", "gdk_wayland_display_get_type" },
+    .{ "gdk_window_get_type", "gdk_window_get_type" },
+    .{ "gdk_window_set_transient_for", "gdk_window_set_transient_for" },
+    .{ "gdk_x11_display_get_type", "gdk_x11_display_get_type" },
 };
 
 const gtk_syms = .{
@@ -430,6 +479,13 @@ const gtk_syms = .{
     .{ "gtk_clipboard_get", "gtk_clipboard_get" },
     .{ "gtk_clipboard_set_text", "gtk_clipboard_set_text" },
     .{ "gtk_clipboard_wait_for_text", "gtk_clipboard_wait_for_text" },
+    .{ "gtk_events_pending", "gtk_events_pending" },
+    .{ "gtk_main", "gtk_main" },
+    .{ "gtk_main_iteration_do", "gtk_main_iteration_do" },
+    .{ "gtk_main_quit", "gtk_main_quit" },
+    .{ "gtk_settings_get_default", "gtk_settings_get_default" },
+    .{ "gtk_style_context_new", "gtk_style_context_new" },
+    .{ "gtk_window_set_default_icon_from_file", "gtk_window_set_default_icon_from_file" },
 };
 
 const webkit_syms = .{
@@ -438,6 +494,7 @@ const webkit_syms = .{
     .{ "webkit_user_content_manager_register_script_message_handler", "webkit_user_content_manager_register_script_message_handler" },
     .{ "webkit_user_content_manager_add_script", "webkit_user_content_manager_add_script" },
     .{ "webkit_user_script_new", "webkit_user_script_new" },
+    .{ "webkit_user_script_unref", "webkit_user_script_unref" },
     .{ "webkit_web_view_load_uri", "webkit_web_view_load_uri" },
     .{ "webkit_web_view_load_html", "webkit_web_view_load_html" },
     .{ "webkit_web_view_run_javascript", "webkit_web_view_run_javascript" },
@@ -452,6 +509,8 @@ const webkit_syms = .{
     .{ "webkit_web_view_set_zoom_level", "webkit_web_view_set_zoom_level" },
     .{ "webkit_web_view_get_zoom_level", "webkit_web_view_get_zoom_level" },
     .{ "webkit_web_view_get_settings", "webkit_web_view_get_settings" },
+    .{ "webkit_web_view_get_inspector", "webkit_web_view_get_inspector" },
+    .{ "webkit_web_inspector_show", "webkit_web_inspector_show" },
     .{ "webkit_web_view_get_user_content_manager", "webkit_web_view_get_user_content_manager" },
     .{ "webkit_settings_set_enable_developer_extras", "webkit_settings_set_enable_developer_extras" },
     .{ "webkit_settings_set_enable_javascript", "webkit_settings_set_enable_javascript" },
@@ -459,10 +518,10 @@ const webkit_syms = .{
     .{ "webkit_settings_set_enable_smooth_scrolling", "webkit_settings_set_enable_smooth_scrolling" },
     .{ "webkit_settings_set_hardware_acceleration_policy", "webkit_settings_set_hardware_acceleration_policy" },
     .{ "webkit_settings_set_user_agent", "webkit_settings_set_user_agent" },
-    .{ "webkit_security_manager_get_singleton", "webkit_security_manager_get_singleton" },
     .{ "webkit_security_manager_register_uri_scheme_as_cors_enabled", "webkit_security_manager_register_uri_scheme_as_cors_enabled" },
     .{ "webkit_security_manager_register_uri_scheme_as_secure", "webkit_security_manager_register_uri_scheme_as_secure" },
     .{ "webkit_web_context_get_default", "webkit_web_context_get_default" },
+    .{ "webkit_web_context_get_security_manager", "webkit_web_context_get_security_manager" },
     .{ "webkit_web_context_register_uri_scheme", "webkit_web_context_register_uri_scheme" },
     .{ "webkit_web_context_set_cache_model", "webkit_web_context_set_cache_model" },
     .{ "webkit_web_context_clear_cache", "webkit_web_context_clear_cache" },
@@ -473,12 +532,13 @@ const webkit_syms = .{
     .{ "webkit_uri_scheme_request_finish_error", "webkit_uri_scheme_request_finish_error" },
     .{ "webkit_web_view_terminate_web_process", "webkit_web_view_terminate_web_process" },
     .{ "webkit_web_view_get_estimated_load_progress", "webkit_web_view_get_estimated_load_progress" },
-    .{ "webkit_web_view_inspector_open", "webkit_web_view_inspector_open" },
-    .{ "webkit_web_view_is_inspector_open", "webkit_web_view_is_inspector_open" },
     .{ "webkit_navigation_action_get_request", "webkit_navigation_action_get_request" },
     .{ "webkit_uri_request_get_uri", "webkit_uri_request_get_uri" },
+    .{ "webkit_policy_decision_ignore", "webkit_policy_decision_ignore" },
+    .{ "webkit_navigation_policy_decision_get_navigation_action", "webkit_navigation_policy_decision_get_navigation_action" },
     .{ "webkit_navigation_action_is_user_gesture", "webkit_navigation_action_is_user_gesture" },
     .{ "webkit_web_view_load_bytes", "webkit_web_view_load_bytes" },
+    .{ "webkit_web_view_call_async_javascript_function", "webkit_web_view_call_async_javascript_function" },
 };
 
 // ----------------------------------------------------------------- helpers
@@ -487,6 +547,16 @@ pub const cstr_max = 4096;
 
 /// A stack buffer holding a NUL-terminated copy of `s`. Truncates if `s` is
 /// longer than `cstr_max - 1`.
+/// Copies `s` into a NUL-terminated allocation from `allocator`. Use this
+/// instead of `CStr` for anything whose length is not bounded by the caller:
+/// `CStr` truncates, which is correct for a window title and catastrophic for a
+/// script.
+pub fn dupeCStr(allocator: std.mem.Allocator, s: []const u8) ![:0]u8 {
+    const out = try allocator.allocSentinel(u8, s.len, 0);
+    @memcpy(out, s);
+    return out;
+}
+
 pub const CStr = struct {
     buf: [cstr_max]u8 = undefined,
     len: usize = 0,
@@ -525,7 +595,7 @@ pub fn freeString(p: ?[*:0]u8) void {
 
 /// Connects a signal. `cb` must be a C-callable function pointer created with
 /// `makeSignalCallback` or a Zig `callconv(.c)` function.
-pub fn connectSignal(obj: gpointer, signal: [*:0]const u8, cb: *const anyopaque, data: gpointer) gulong {
+pub fn connectSignal(obj: ?gpointer, signal: [*:0]const u8, cb: *const anyopaque, data: ?gpointer) gulong {
     return g_signal_connect_data(obj, signal, cb, data, null, 0);
 }
 
@@ -550,8 +620,8 @@ pub fn gtkInit() gboolean {
 /// Whether the session runs Wayland. GTK picks the backend; this only informs
 /// the messages and the platform differences.
 pub fn isWayland() bool {
-    const wl = std.posix.getenv("WAYLAND_DISPLAY") orelse "";
-    const session = std.posix.getenv("XDG_SESSION_TYPE") orelse "";
+    const wl = env.get("WAYLAND_DISPLAY") orelse "";
+    const session = env.get("XDG_SESSION_TYPE") orelse "";
     return wl.len > 0 or std.mem.eql(u8, session, "wayland");
 }
 

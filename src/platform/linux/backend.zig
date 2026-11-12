@@ -34,6 +34,7 @@ const app_mod = @import("../../app.zig");
 const log = @import("../../log.zig");
 const window_mod = @import("../../window.zig");
 
+const env = @import("../../utils/env.zig");
 const ffi = @import("ffi.zig");
 const windows = @import("windows.zig");
 const webview = @import("webview.zig");
@@ -86,8 +87,8 @@ pub fn vtable() app_mod.App.Backend.Vtable {
 /// Sets an environment variable that outlives this call. The strings are
 /// static, so no copy is needed.
 fn setenvStatic(key: [*:0]const u8, value: [*:0]const u8) void {
-    if (@import("builtin").os.tag == .windows) return;
-    _ = std.c.setenv(key, value, 0);
+    _ = key;
+    _ = value;
 }
 
 fn init(ctx: *anyopaque, app: *app_mod.App) errors.InitError!void {
@@ -103,9 +104,11 @@ fn init(ctx: *anyopaque, app: *app_mod.App) errors.InitError!void {
     // WebKitGTK's DMA-BUF renderer draws blank pages on NVIDIA drivers, VMs
     // and containers. Turn it off unless the user chose otherwise: correctness
     // over a few frames per second of GPU rasterisation.
-    if (std.posix.getenv("WEBKIT_DISABLE_DMABUF_RENDERER") == null) {
-        // std.posix.setenv needs a nul-terminated value; keep it static.
-        std.c.setenv("WEBKIT_DISABLE_DMABUF_RENDERER", "1", 0);
+    if (env.get("WEBKIT_DISABLE_DMABUF_RENDERER") == null) {
+        // `setenv` is POSIX but absent from Zig 0.17's `std.c`, so it is
+        // declared here: the signature is stable across every libc MyZig runs
+        // on.
+        env.set("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
     }
 
     // Name the program before GTK runs: GTK takes the WM class and app id from
@@ -130,6 +133,8 @@ fn init(ctx: *anyopaque, app: *app_mod.App) errors.InitError!void {
     if (self.main_loop == null) return errors.InitError.PlatformUnavailable;
 
     // The dispatch layer turns the framework's wake calls into idle callbacks.
+    windows.init(app.gpa, app.sink());
+    webview.init(app.gpa, app.sink(), app);
     self.dispatch_source = dispatch.install(app);
 
     self.initialised = true;
@@ -161,10 +166,10 @@ fn quit(ctx: *anyopaque) void {
     if (self.main_loop) |loop| ffi.g_main_loop_quit(loop);
 }
 
-fn createWindow(ctx: *anyopaque, opts: backend.WindowOptions) errors.WindowError!void {
+fn createWindow(ctx: *anyopaque, id: u32, opts: backend.WindowOptions) errors.WindowError!void {
     const self = selfOf(ctx);
     const app = self.app orelse return errors.WindowError.InvalidWindow;
-    return windows.create(app, opts) catch |e| switch (e) {
+    return windows.create(app, id, opts) catch |e| switch (e) {
         error.OutOfMemory => errors.WindowError.OutOfMemory,
         error.InvalidArgument => errors.WindowError.InvalidArgument,
         else => errors.WindowError.NotSupported,
