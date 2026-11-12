@@ -50,6 +50,7 @@ pub const Error = error{
 
 const atspi_accessible = "org.a11y.atspi.Accessible";
 const atspi_component = "org.a11y.atspi.Component";
+const atspi_action = "org.a11y.atspi.Action";
 const atspi_event = "org.a11y.atspi.Event.Object";
 
 /// Where AT-SPI looks for the root object.
@@ -199,6 +200,19 @@ pub const Bridge = struct {
         }
         if (std.mem.eql(u8, member, "GetInterfaces")) {
             return self.replyInterfaces(msg);
+        }
+        if (std.mem.eql(u8, member, "GetActions")) {
+            return self.replyActions(msg, target.node);
+        }
+        if (std.mem.eql(u8, member, "GetActionName")) {
+            const index = self.firstI32Arg(msg) orelse return;
+            const name = actionName(target.node, index) orelse return;
+            return self.replyString(msg, name);
+        }
+        if (std.mem.eql(u8, member, "DoAction")) {
+            const index = self.firstI32Arg(msg) orelse return;
+            const did = self.doAction(target.node, index);
+            return self.replyBool(msg, did);
         }
         if (std.mem.eql(u8, member, "GetChildAtIndex")) {
             const index = self.firstU32Arg(msg) orelse return;
@@ -502,11 +516,66 @@ pub const Bridge = struct {
         self.syms.message_iter_init_append(reply, &it);
         var array_it: dbus.DBusMessageIter = .{};
         _ = self.syms.message_iter_open_container(&it, dbus.DBUS_TYPE_ARRAY, "s", &array_it);
-        for ([_][*:0]const u8{ atspi_accessible, atspi_component }) |name| {
+        for ([_][*:0]const u8{ atspi_accessible, atspi_action, atspi_component }) |name| {
             _ = self.syms.message_iter_append_basic(&array_it, dbus.DBUS_TYPE_STRING, @ptrCast(&name));
         }
         _ = self.syms.message_iter_close_container(&it, &array_it);
         self.send(reply);
+    }
+
+    /// `GetActions` returns one struct per action: name, description, key
+    /// binding and the interface's own id. Only the name is filled, because
+    /// MyZig has no key binding to report and a reader uses the name.
+    fn replyActions(self: *Bridge, msg: *dbus.DBusMessage, target: *const a11y.Node) void {
+        const reply = self.syms.message_new_method_return(msg) orelse return;
+        defer self.syms.message_unref(reply);
+        var it: dbus.DBusMessageIter = .{};
+        self.syms.message_iter_init_append(reply, &it);
+
+        var array_it: dbus.DBusMessageIter = .{};
+        _ = self.syms.message_iter_open_container(&it, dbus.DBUS_TYPE_ARRAY, "(sss)", &array_it);
+        for (target.actions) |action| {
+            var struct_it: dbus.DBusMessageIter = .{};
+            _ = self.syms.message_iter_open_container(&array_it, dbus.DBUS_TYPE_STRUCT, null, &struct_it);
+
+            var name_buf: [256]u8 = undefined;
+            const n = @min(action.name.len, name_buf.len - 1);
+            @memcpy(name_buf[0..n], action.name[0..n]);
+            name_buf[n] = 0;
+            const name_ptr: [*:0]const u8 = @ptrCast(&name_buf);
+            _ = self.syms.message_iter_append_basic(&struct_it, dbus.DBUS_TYPE_STRING, @ptrCast(&name_ptr));
+
+            // No description and no key binding: an empty string is honest,
+            // where an invented key would be wrong.
+            var empty: [1]u8 = .{0};
+            const empty_ptr: [*:0]const u8 = @ptrCast(&empty);
+            _ = self.syms.message_iter_append_basic(&struct_it, dbus.DBUS_TYPE_STRING, @ptrCast(&empty_ptr));
+            _ = self.syms.message_iter_append_basic(&struct_it, dbus.DBUS_TYPE_STRING, @ptrCast(&empty_ptr));
+
+            _ = self.syms.message_iter_close_container(&array_it, &struct_it);
+        }
+        _ = self.syms.message_iter_close_container(&it, &array_it);
+        self.send(reply);
+    }
+
+    /// Runs an action on behalf of a reader. A press is delivered to the
+    /// application as a click at the node's centre, which is the same path a
+    /// pointer takes, so a button's own handler is what runs.
+    fn doAction(self: *Bridge, target: *const a11y.Node, index: i32) bool {
+        _ = self;
+        if (index < 0) return false;
+        const i: usize = @intCast(index);
+        if (i >= target.actions.len) return false;
+        const action = target.actions[i];
+        if (action.kind != .press) return false;
+
+        // The press goes through whatever the backend installed for surface
+        // input. With no handler there is nobody to press for.
+        const hook = press_hook orelse return false;
+        const b = target.bounds;
+        const cx = b.x + @divTrunc(b.width, 2);
+        const cy = b.y + @divTrunc(b.height, 2);
+        return hook(cx, cy);
     }
 
     fn send(self: *Bridge, msg: *dbus.DBusMessage) void {
@@ -546,6 +615,25 @@ pub const Bridge = struct {
         return value;
     }
 };
+
+/// How an action reaches the application. The Linux backend installs this so
+/// a reader's press becomes an ordinary click on the window's surface.
+var press_hook: ?*const fn (x: i32, y: i32) bool = null;
+
+/// Installs the handler a reader's press goes through. The backend calls this
+/// once, when it knows which window a surface belongs to.
+pub fn setPressHook(hook: *const fn (x: i32, y: i32) bool) void {
+    press_hook = hook;
+}
+
+/// The first action of a node with `index`, or none. Written here so the
+/// builder and the bridge agree about what an empty table means.
+pub fn actionName(target: *const a11y.Node, index: i32) ?[]const u8 {
+    if (index < 0) return null;
+    const i: usize = @intCast(index);
+    if (i >= target.actions.len) return null;
+    return target.actions[i].name;
+}
 
 /// The process-wide bridge. Accessibility is one connection per application,
 /// not one per window, so it lives here rather than in a surface.

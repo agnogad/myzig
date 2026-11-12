@@ -40,6 +40,8 @@ fn describe(ctx: *anyopaque, builder: *anyopaque, size: myzig.platform.backend.D
     for (labels, 0..) |label, i| {
         const id = b.beginNode(.button, frames[i]) catch return;
         b.setName(id, label) catch return;
+        // A reader can press these, not just read them.
+        b.setPressAction(id, label) catch return;
         b.endNode();
     }
 }

@@ -90,6 +90,8 @@ pub fn attach(window_id: u32, parent: ffi.GtkWidget, width: i32, height: i32) !*
     s.builder_ready = true;
 
     try surfaces.put(gpa, window_id, s);
+    press_window = window_id;
+    atspi.setPressHook(&a11yPress);
 
     resize(s, width, height, 1);
 
@@ -246,6 +248,30 @@ const EventXY = extern struct {
 fn eventXY(event: ?*anyopaque) struct { x: f64, y: f64 } {
     const e: *const EventXY = @ptrCast(@alignCast(event orelse return .{ .x = 0, .y = 0 }));
     return .{ .x = e.x, .y = e.y };
+}
+
+/// Delivers a press at a DIP position, as if the pointer had clicked there.
+/// This is the path an accessibility client's `DoAction` takes: the same
+/// down-then-up pair a real click produces, so the application's own handler
+/// runs and nothing has to know the press came from a screen reader.
+pub fn pressAt(window_id: u32, x: i32, y: i32) bool {
+    const s = surfaces.get(window_id) orelse return false;
+    const sk = sink orelse return false;
+    const fx: f32 = @floatFromInt(x);
+    const fy: f32 = @floatFromInt(y);
+
+    sk.surfaceInput(window_id, .{ .pointer_down = .{ .x = fx, .y = fy, .button = .left } });
+    sk.surfaceInput(window_id, .{ .pointer_up = .{ .x = fx, .y = fy, .button = .left } });
+    if (s.widget) |w| ffi.gtk_widget_queue_draw(w);
+    return true;
+}
+
+/// The window the accessibility bridge's press should go to. Set when a single
+/// surface is attached; with several, the most recently drawn one.
+var press_window: u32 = 0;
+
+fn a11yPress(x: i32, y: i32) bool {
+    return pressAt(press_window, x, y);
 }
 
 fn onButtonPress(widget: ffi.GtkWidget, event: ?*anyopaque, user_data: ?*anyopaque) callconv(.c) ffi.gboolean {

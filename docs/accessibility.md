@@ -129,11 +129,29 @@ tree never maps it.
 
 Implemented calls: `GetChildCount`, `GetChildAtIndex`, `GetChildren`, `GetRole`,
 `GetRoleName`, `GetName`, `GetDescription`, `GetState`, `GetParent`,
-`GetInterfaces`, `Contains`, `GetExtents`.
+`GetInterfaces`, `GetActions`, `GetActionName`, `DoAction`, `Contains`,
+`GetExtents`.
 
-**Not implemented:** `DoAction`. A reader can find a button and read its label,
-but pressing it from the reader is not wired up yet. `GetText` and the value
-interface are also missing, so a slider's numeric value is not announced.
+**Not implemented:** `GetText` and the value interface, so a slider's numeric
+value is not announced yet.
+
+## Letting a reader press a button
+
+```zig
+const id = try b.beginNode(.button, frames[i]);
+try b.setName(id, "+10");
+try b.setPressAction(id, "+10");
+b.endNode();
+```
+
+`setPressAction` publishes an action named `"+10"`. When a reader invokes it,
+the press is delivered as an ordinary click at the node's centre — the same
+down-then-up pair a pointer produces, through the same handler. Nothing in the
+application has to know the press came from a screen reader, and a button that
+works with a mouse works with a reader.
+
+A node with no actions is readable but not operable, which is the right default
+for a label.
 
 ## Verifying it
 

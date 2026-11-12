@@ -148,6 +148,31 @@ pub const Node = struct {
     next_sibling: ?u32 = null,
     /// The node's own id, so a caller can keep a reference across frames.
     id: u32 = 0,
+    /// What a reader can do to this node, in the order a reader offers it.
+    actions: []const Action = &.{},
+};
+
+/// Something an accessibility client can ask a node to do.
+///
+/// An action is published because a screen reader drives an interface through
+/// it: without one a reader can find a button and read its label but can never
+/// press it, which leaves the whole interface unusable without a mouse.
+pub const Action = struct {
+    /// What a reader shows. AT-SPI calls the first one the node's action.
+    name: []const u8,
+    /// How the application receives it: the same number a pointer press at the
+    /// node's centre would arrive with.
+    kind: Kind,
+};
+
+pub const Kind = enum {
+    /// A press: the button's own handler runs.
+    press,
+    /// Focus without pressing, for a text field.
+    focus,
+    /// A vertical step, for a slider.
+    increment,
+    decrement,
 };
 
 /// A read-only view of a finished tree.
@@ -172,6 +197,8 @@ pub const Builder = struct {
     nodes: std.ArrayListUnmanaged(Node) = .empty,
     /// The strings the nodes point at, freed together at `begin`.
     strings: std.ArrayListUnmanaged([]const u8) = .empty,
+    /// The action tables, freed together with the strings.
+    action_tables: std.ArrayListUnmanaged([]Action) = .empty,
     /// The node being filled, or `null` at the root.
     open: ?u32 = null,
     /// Whether `begin` has been called for this frame.
@@ -184,6 +211,8 @@ pub const Builder = struct {
     pub fn deinit(self: *Builder) void {
         for (self.strings.items) |s| self.gpa.free(s);
         self.strings.deinit(self.gpa);
+        for (self.action_tables.items) |t| self.gpa.free(t);
+        self.action_tables.deinit(self.gpa);
         self.nodes.deinit(self.gpa);
     }
 
@@ -204,6 +233,8 @@ pub const Builder = struct {
     fn clear(self: *Builder) void {
         for (self.strings.items) |s| self.gpa.free(s);
         self.strings.clearRetainingCapacity();
+        for (self.action_tables.items) |t| self.gpa.free(t);
+        self.action_tables.clearRetainingCapacity();
         self.nodes.clearRetainingCapacity();
         self.open = null;
         self.started = false;
@@ -281,6 +312,18 @@ pub const Builder = struct {
         const copy = try self.gpa.dupe(u8, text);
         try self.strings.append(self.gpa, copy);
         self.nodes.items[id].value = copy;
+    }
+
+    /// Records that a reader may press this node. The application's own press
+    /// handler runs, as if the pointer had clicked the node's centre.
+    pub fn setPressAction(self: *Builder, id: u32, label: []const u8) !void {
+        if (id >= self.nodes.items.len) return;
+        const copy = try self.gpa.dupe(u8, label);
+        try self.strings.append(self.gpa, copy);
+        const table = try self.gpa.alloc(Action, 1);
+        try self.action_tables.append(self.gpa, table);
+        table[0] = .{ .name = copy, .kind = .press };
+        self.nodes.items[id].actions = table;
     }
 
     pub fn setStates(self: *Builder, id: u32, states: States) void {
@@ -427,6 +470,23 @@ test "a hidden node is not hit" {
     try std.testing.expect(hit != button);
     try std.testing.expectEqual(@as(?u32, 0), b.hitTest(20, 20));
     try std.testing.expectEqual(@as(?u32, 0), b.hitTest(300, 200));
+}
+
+test "an action is recorded and freed with the frame" {
+    const gpa = std.testing.allocator;
+    var b = Builder.init(gpa);
+    defer b.deinit();
+
+    try b.begin(.{ .width = 100, .height = 100 });
+    const id = try b.beginNode(.button, .{ .x = 10, .y = 10, .width = 40, .height = 20 });
+    try b.setName(id, "Save");
+    try b.setPressAction(id, "Save");
+    b.endNode();
+
+    const snap = b.snapshot();
+    try std.testing.expectEqual(@as(usize, 1), snap.get(id).?.actions.len);
+    try std.testing.expectEqualStrings("Save", snap.get(id).?.actions[0].name);
+    try std.testing.expectEqual(Kind.press, snap.get(id).?.actions[0].kind);
 }
 
 test "a new frame frees the old strings" {
