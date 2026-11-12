@@ -231,6 +231,23 @@ pub const Bridge = struct {
         if (std.mem.eql(u8, member, "GetValueText")) {
             return self.replyString(msg, target.node.value);
         }
+        if (std.mem.eql(u8, member, "SetCurrentValue")) {
+            const value = self.firstDoubleArg(msg) orelse return;
+            const n = target.node.numeric orelse return;
+            const setter = n.setter orelse {
+                log.debug("accessibility: SetCurrentValue on a node with no setter", .{});
+                return;
+            };
+            // A value outside the range is clamped rather than rejected: a
+            // reader that asks for 120 on a 0..100 slider wants the top.
+            const clamped = @max(n.min, @min(n.max, value));
+            setter.call(setter.ctx, clamped);
+            // The value changed, so the frame that describes it has to be
+            // painted again. Without this the tree keeps the old value until
+            // something else happens to ask for a repaint.
+            if (repaint_hook) |hook| hook();
+            return self.replyVoid(msg);
+        }
         if (std.mem.eql(u8, member, "GetInterfaces")) {
             return self.replyInterfaces(msg, target.node);
         }
@@ -599,6 +616,23 @@ pub const Bridge = struct {
         self.send(reply);
     }
 
+    /// The first double argument, for `SetCurrentValue`.
+    fn firstDoubleArg(self: *Bridge, msg: *dbus.DBusMessage) ?f64 {
+        var it: dbus.DBusMessageIter = .{};
+        if (self.syms.message_iter_init(msg, &it) == 0) return null;
+        if (self.syms.message_iter_get_arg_type(&it) != dbus.DBUS_TYPE_DOUBLE) return null;
+        var v: f64 = 0;
+        self.syms.message_iter_get_basic(&it, @ptrCast(&v));
+        return v;
+    }
+
+    /// An empty reply, for a call that succeeded and returns nothing.
+    fn replyVoid(self: *Bridge, msg: *dbus.DBusMessage) void {
+        const reply = self.syms.message_new_method_return(msg) orelse return;
+        defer self.syms.message_unref(reply);
+        self.send(reply);
+    }
+
     /// The `index`th int32 argument, for calls that take two.
     fn argI32(self: *Bridge, msg: *dbus.DBusMessage, index: usize) ?i32 {
         var it: dbus.DBusMessageIter = .{};
@@ -709,6 +743,13 @@ pub const Bridge = struct {
         return value;
     }
 };
+
+/// Asks for the described window to be drawn again, after a value changed.
+var repaint_hook: ?*const fn () void = null;
+
+pub fn setRepaintHook(hook: *const fn () void) void {
+    repaint_hook = hook;
+}
 
 /// How an action reaches the application. The Linux backend installs this so
 /// a reader's press becomes an ordinary click on the window's surface.

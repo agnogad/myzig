@@ -92,6 +92,7 @@ pub fn attach(window_id: u32, parent: ffi.GtkWidget, width: i32, height: i32) !*
     try surfaces.put(gpa, window_id, s);
     press_window = window_id;
     atspi.setPressHook(&a11yPress);
+    atspi.setRepaintHook(&a11yRepaint);
 
     resize(s, width, height, 1);
 
@@ -269,6 +270,12 @@ pub fn pressAt(window_id: u32, x: i32, y: i32) bool {
 /// The window the accessibility bridge's press should go to. Set when a single
 /// surface is attached; with several, the most recently drawn one.
 var press_window: u32 = 0;
+
+/// Paints the window a value change belongs to, so the tree a reader reads next
+/// matches the pixels on screen.
+fn a11yRepaint() void {
+    requestFrame(press_window);
+}
 
 fn a11yPress(x: i32, y: i32) bool {
     return pressAt(press_window, x, y);

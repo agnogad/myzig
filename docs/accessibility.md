@@ -138,9 +138,8 @@ press, `Text` only where there is text, and `Value` only where there is a
 number. A reader believes the list, so naming an interface that answers nothing
 would be worse than leaving it out.
 
-**Not implemented:** editing. A reader can read a text field and a slider's
-value, but `SetTextContents` and `SetCurrentValue` are not answered, so a reader
-can inspect a value without being able to change it.
+**Not implemented:** `SetTextContents`, so a reader can change a slider's value
+but not type into a text field.
 
 ## Letting a reader press a button
 
@@ -174,6 +173,27 @@ b.endNode();
 compares. A reader announces position from the number and its range, because a
 string cannot tell it whether the slider is near the top. Both are published, so
 the spoken value and the range agree.
+
+## Letting a reader change a value
+
+```zig
+b.setNumber(slider, .{
+    .value = 60,
+    .min = 0,
+    .max = 100,
+    .step = 5,
+    .setter = .{ .call = setOpacity, .ctx = &state.opacity },
+});
+```
+
+`SetCurrentValue` runs the callback on the thread that pumps the loop, with the
+value clamped to the range, and then asks for the window to be painted again.
+The repaint is not a nicety: the tree is rebuilt from `describe` when the window
+draws, so without it a reader would keep answering with the old value until
+something else happened to cause a frame.
+
+A node with no setter refuses `SetCurrentValue` rather than accepting a value
+nobody receives.
 
 ## Verifying it
 

@@ -14,6 +14,9 @@ const ui = myzig.ui;
 const State = struct {
     clicks: i32 = 0,
     dark: bool = false,
+    /// Set by a screen reader through the accessibility tree, and by nothing
+    /// else: it exists to prove a reader can change a value, not just read one.
+    opacity: u8 = 60,
 };
 
 /// Frames from the last paint, so a click and a frame agree about where each
@@ -25,6 +28,11 @@ const labels = [_][]const u8{ "+1", "+10", "Theme" };
 
 /// Describes the window to a screen reader: the same labels and frames that
 /// `draw` puts on screen, in the order a reader walks them.
+fn setOpacity(ctx: *anyopaque, value: f64) void {
+    const opacity: *u8 = @ptrCast(@alignCast(ctx));
+    opacity.* = @intFromFloat(@max(0, @min(255, value)));
+}
+
 fn describe(ctx: *anyopaque, builder: *anyopaque, size: myzig.platform.backend.DrawRect) void {
     _ = size;
     const state: *State = @ptrCast(@alignCast(ctx));
@@ -41,8 +49,19 @@ fn describe(ctx: *anyopaque, builder: *anyopaque, size: myzig.platform.backend.D
     // what a reader needs to announce what is in it rather than that it exists.
     const slider = b.beginNode(.slider, .{ .x = 16, .y = 220, .width = 240, .height = 20 }) catch return;
     b.setName(slider, "Opacity") catch return;
-    b.setValue(slider, "60%") catch return;
-    b.setNumber(slider, .{ .value = 60, .min = 0, .max = 100, .step = 5 });
+    var pct_buf: [8]u8 = undefined;
+    const pct = std.fmt.bufPrint(&pct_buf, "{d}%", .{state.opacity}) catch "?";
+
+    b.setValue(slider, pct) catch return;
+    b.setNumber(slider, .{
+        .value = @floatFromInt(state.opacity),
+        .min = 0,
+        .max = 100,
+        .step = 5,
+        // A reader that asks for a value gets it: the callback runs on the
+        // toolkit thread, so the state it changes is the state `draw` reads.
+        .setter = .{ .call = setOpacity, .ctx = &state.opacity },
+    });
     b.endNode();
 
     for (labels, 0..) |label, i| {
@@ -78,6 +97,11 @@ fn draw(ctx: *anyopaque, builder: *anyopaque, size: myzig.platform.backend.DrawR
     const line = std.fmt.bufPrint(&buf, "Clicks: {d}", .{state.clicks}) catch "Clicks: ?";
     b.text(.{ .x = 16, .y = 72, .width = 240, .height = 16 }, line, ink, 1) catch return;
     b.text(.{ .x = 16, .y = 104, .width = 320, .height = 8 }, "No page. No WebKit. Just Zig.", muted, 1) catch return;
+
+    // The value a screen reader can change. Drawn so the change is visible.
+    var op_buf: [24]u8 = undefined;
+    const op = std.fmt.bufPrint(&op_buf, "Opacity: {d}%", .{state.opacity}) catch "Opacity";
+    b.text(.{ .x = 16, .y = 220, .width = 240, .height = 8 }, op, ink, 1) catch return;
     // The font covers Latin-1 and the letters Turkish adds, so an interface
     // can be written in its own language.
     b.text(.{ .x = 16, .y = 128, .width = 400, .height = 8 }, "Türkçe: ışık, çğüşö, İstanbul", muted, 1) catch return;

@@ -156,6 +156,9 @@ pub const Node = struct {
     actions: []const Action = &.{},
 };
 
+/// Asks the application to take a new value a reader sent.
+pub const ValueSetter = *const fn (ctx: *anyopaque, value: f64) void;
+
 /// A number a reader can compare against its range.
 pub const Number = struct {
     value: f64,
@@ -163,6 +166,14 @@ pub const Number = struct {
     max: f64 = 100,
     /// The amount one step changes, which `increment` and `decrement` use.
     step: f64 = 1,
+    /// How a reader's new value reaches the application. Without one the node
+    /// is readable but not settable, and the bridge says so by refusing
+    /// `SetCurrentValue` instead of accepting a value nobody receives.
+    /// Set together; a setter without a context cannot be called.
+    setter: ?struct {
+        call: ValueSetter,
+        ctx: *anyopaque,
+    } = null,
 };
 
 /// Something an accessibility client can ask a node to do.
@@ -524,6 +535,32 @@ test "a number is published with its range" {
     const n = b.snapshot().get(id).?.numeric.?;
     try std.testing.expectEqual(@as(f64, 60), n.value);
     try std.testing.expectEqual(@as(f64, 5), n.step);
+}
+
+test "a setter reaches the application with the value it was given" {
+    const gpa = std.testing.allocator;
+
+    const Sink = struct {
+        var last: f64 = 0;
+        fn set(ctx: *anyopaque, value: f64) void {
+            _ = ctx;
+            last = value;
+        }
+    };
+    Sink.last = 0;
+    var token: u8 = 0;
+
+    var b = Builder.init(gpa);
+    defer b.deinit();
+
+    try b.begin(.{ .width = 100, .height = 100 });
+    const id = try b.beginNode(.slider, .{ .width = 100, .height = 20 });
+    b.setNumber(id, .{ .value = 60, .setter = .{ .call = Sink.set, .ctx = &token } });
+    b.endNode();
+
+    const n = b.snapshot().get(id).?.numeric.?;
+    n.setter.?.call(n.setter.?.ctx, 85);
+    try std.testing.expectEqual(@as(f64, 85), Sink.last);
 }
 
 test "a node without a number has none" {
