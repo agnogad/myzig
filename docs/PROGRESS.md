@@ -16,9 +16,10 @@ here only once it compiles, has tests, and has been run.
 | 2 | Typed IPC: service binding, events, TypeScript client generation | **Done** |
 | 3 | Desktop APIs: clipboard, dialogs, notifications, tray, menus, shortcuts | **Done** |
 | 4 | Native UI toolkit: layout, rendering, accessibility | **In progress** (layout, rasteriser, input done; accessibility pending) |
-| 5 | Windows backend: Win32 + WebView2 | Not started |
-| 6 | macOS backend: AppKit + WKWebView | Not started |
-| 7 | Ecosystem: CLI, plugins, packaging, auto-update | Not started |
+| 5 | Command line: `new`, `generate`, `doctor` | **Done** |
+| 6 | Windows backend: Win32 + WebView2 | Not started |
+| 7 | macOS backend: AppKit + WKWebView | Not started |
+| 8 | Ecosystem: plugins, packaging, auto-update | Not started |
 
 ## What works today
 
@@ -109,9 +110,32 @@ Three real bugs came out of running it:
 
 Still open in this milestone: accessibility (exposing the tree to AT-SPI),
 GPU rendering, and text beyond ASCII.
-* Native UI: `counter-native` opens a window and prints that the toolkit is not
-  there yet (milestone 4).
+* Native UI is available: `counter-native` and `native-ui` draw and take input
+  with no web engine loaded.
 * The Windows and macOS backends return `NotSupported` from every entry point.
+
+## Milestone 5: the `myzig` command line
+
+`myzig new NAME [--web|--native]` writes a project that builds and runs.
+`myzig generate --out FILE` writes the TypeScript client; the declaration
+passes `tsc --strict --noEmit`. `myzig doctor` reports the Zig version, the
+target and which native libraries are present.
+
+A generated project was built and run end to end: the page called
+`Hello.greet("MyZig")` through the bridge and printed `Hello, MyZig!`.
+
+Three bugs were fixed by actually running it:
+
+1. **Every reply was a syntax error in the page.** The batch builder opened a
+   JSON array that nothing closed, so the page received `receive([{...})`. The
+   page reported it as a `SyntaxError` at `index.html:1`, which pointed at the
+   bridge rather than at the reply. The brackets now live in one place.
+2. **The manifest fingerprint halves were swapped.** `zig build` rejected every
+   generated project and printed the value it wanted. The crc goes high, the id
+   low.
+3. **The dependency path was a hardcoded `../myzig`.** The framework checkout is
+   now found from `MYZIG_HOME` or the executable's parents and written relative
+   to the new project, since Zig rejects an absolute path in a manifest.
 
 ## Test suite
 
