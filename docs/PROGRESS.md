@@ -90,7 +90,9 @@ A window can now be drawn entirely by MyZig, with no page and no WebKit.
   blitted through cairo. `cairo` is loaded at runtime like GTK, so a
   page-only application never maps it.
 
-**Verified on screen**, not just compiled: `native-ui` opens a 720×260 window
+**Verified on screen**, not just compiled: `counter-native` draws a counter and
+three buttons; three presses of `+1` printed `value = 1`, `2`, `3` and the
+screenshot showed a large `3`. `native-ui` opens a 720×260 window
 with a blue header, a counter and three buttons. Clicking `+1` twice and then
 `Theme` printed `clicks = 2, dark = true`, and the next screenshot showed a
 dark background and a highlighted Theme button. No web engine was loaded.
