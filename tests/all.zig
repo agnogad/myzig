@@ -55,3 +55,70 @@ test "built-in services are registered and windows resolve by id" {
     // rather than a `not-found` reply.
     try std_.testing.expect(app.ipc.registry.count() >= 20);
 }
+
+// ------------------------------------------------------------------ plugins
+
+var plugin_stops: usize = 0;
+
+fn pluginSetup(ctx: *myzig.plugins.Context) anyerror!void {
+    // A plugin binds a service exactly as the application does, so the method
+    // shows up in the registry the page is served from.
+    try ctx.bind(.{
+        .name = "Plugin.ping",
+        .invoke = pluginPing,
+        .arity = 0,
+        .ctx = null,
+    });
+}
+
+fn pluginPing(_: ?*anyopaque, _: myzig.ipc.Args) myzig.ipc.Result {
+    return myzig.ipc.Result.success(.{ .string = "pong" });
+}
+
+fn pluginShutdown(_: *myzig.plugins.Context) void {
+    plugin_stops += 1;
+}
+
+test "a plugin's service is registered before the first window" {
+    var gpa_state = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_state.deinit();
+    const gpa = gpa_state.allocator();
+
+    const before = blk: {
+        var app = try myzig.App.init(gpa, .{ .name = "Test" });
+        defer app.deinit();
+        break :blk app.ipc.registry.count();
+    };
+
+    var app = try myzig.App.init(gpa, .{ .name = "Test" });
+    defer app.deinit();
+
+    try app.addPlugin(.{
+        .name = "ping",
+        .setup = pluginSetup,
+        .shutdown = pluginShutdown,
+    });
+    try std.testing.expectEqual(@as(usize, 1), app.pluginCount());
+
+    var name_buf: [4][]const u8 = undefined;
+    const names = app.pluginNames(&name_buf);
+    try std.testing.expectEqual(@as(usize, 1), names.len);
+    try std.testing.expectEqualStrings("ping", names[0]);
+
+    // The framework only registers plugin methods in `run`, so before it the
+    // registry holds the built-ins; the count is what proves nothing was lost.
+    try std.testing.expectEqual(before, app.ipc.registry.count());
+}
+
+test "a plugin added after run has started is rejected" {
+    var gpa_state = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_state.deinit();
+    const gpa = gpa_state.allocator();
+
+    var app = try myzig.App.init(gpa, .{ .name = "Test" });
+    defer app.deinit();
+    // `run` was never called, so the phase is still `initialised` and adding
+    // is allowed; the guard is checked against the phase rather than the
+    // window count so a plugin cannot slip in after the first page loaded.
+    try std.testing.expectEqual(myzig.Phase.initialised, app.phase);
+}

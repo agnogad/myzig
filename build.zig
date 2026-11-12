@@ -32,6 +32,7 @@ pub fn build(b: *std.Build) void {
         .{ .name = "hello-webview", .path = "examples/hello-webview/main.zig", .desc = "A window showing a web page served by MyZig" },
         .{ .name = "hello-window", .path = "examples/hello-window/main.zig", .desc = "Open and close a native window" },
         .{ .name = "ipc-greeter", .path = "examples/ipc-greeter/main.zig", .desc = "Typed Zig <-> TypeScript calls" },
+        .{ .name = "plugins", .path = "examples/plugins/main.zig", .desc = "A plugin that binds a service and cleans up" },
         .{ .name = "counter-native", .path = "examples/counter-native/main.zig", .desc = "Native GPU-rendered counter UI" },
         .{ .name = "hybrid", .path = "examples/hybrid/main.zig", .desc = "Native chrome around a web view" },
         .{ .name = "desktop-api", .path = "examples/desktop-api/main.zig", .desc = "Clipboard, dialogs, notifications, tray" },

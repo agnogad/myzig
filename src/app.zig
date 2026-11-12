@@ -38,6 +38,7 @@ const paths_mod = @import("utils/paths.zig");
 const env = @import("utils/env.zig");
 const ipc_mod = @import("ipc/ipc.zig");
 const desktop_mod = @import("platform/desktop.zig");
+const plugins_mod = @import("plugins/plugins.zig");
 const menu_mod = @import("menu.zig");
 const json = @import("json.zig");
 const window_mod = @import("window.zig");
@@ -150,6 +151,8 @@ pub const App = struct {
     quit_cancelled: bool = false,
     /// The typed IPC layer: services, subscriptions and in-flight cancels.
     ipc: ipc_mod.Exchange,
+    /// Additional services and lifecycle hooks supplied by plugins.
+    plugins: plugins_mod.Registry,
     /// Storage for the built-in service definitions. The registry keeps
     /// pointers into this array, so it must live as long as the app.
     builtin_methods: [ipc_mod.builtin.count]ipc_mod.service.Method,
@@ -247,6 +250,7 @@ pub const App = struct {
             .be = .{ .ctx = undefined, .vtable = &backend_vtable },
             .be_storage = newBackend(),
             .ipc = ipc_mod.Exchange.init(allocator),
+            .plugins = plugins_mod.Registry.init(allocator),
             .builtin_methods = undefined,
             .options = .{
                 .name = app_name,
@@ -297,6 +301,7 @@ pub const App = struct {
         self.listeners.on_quit_ctx.deinit(self.gpa);
         self.listeners.on_before_quit.deinit(self.gpa);
         self.listeners.on_before_quit_ctx.deinit(self.gpa);
+        self.plugins.deinit();
         self.scratch.deinit();
         self.ipc.deinit();
         self.paths.deinit();
@@ -358,6 +363,29 @@ pub const App = struct {
     /// Registers every method in a slice, for generated glue.
     pub fn bindAll(self: *App, methods: []const ipc_mod.service.Method) !void {
         try self.ipc.registry.addAll(methods);
+    }
+
+    /// Adds a plugin. Its `setup` runs in `run`, after the backend is ready and
+    /// before the first window appears, so the services it binds are visible to
+    /// the first page that loads.
+    ///
+    /// Adding a plugin after `run` has started is an error: a plugin that
+    /// arrives late could bind a method that a page has already looked for and
+    /// found missing.
+    pub fn addPlugin(self: *App, plugin: plugins_mod.Plugin) !void {
+        if (self.phase != .initialised) return error.AlreadyRunning;
+        try self.plugins.add(plugin);
+    }
+
+    /// How many plugins the application added.
+    pub fn pluginCount(self: *const App) usize {
+        return self.plugins.count();
+    }
+
+    /// The names of the added plugins, written into `out`. The slices borrow
+    /// the app, so they are valid until it is destroyed.
+    pub fn pluginNames(self: *const App, out: [][]const u8) []const []const u8 {
+        return self.plugins.names(out);
     }
 
     // -------------------------------------------------------- desktop APIs
@@ -472,6 +500,14 @@ pub const App = struct {
         .ctx = null,
         .vtable = &desktop_vtable,
     };
+
+    /// The desktop vtable as a `Desktop`, for plugins. Plugins run inside the
+    /// application's own process, so they get the same window handles the
+    /// application uses.
+    fn desktopBackend(self: *App) desktop_mod.Desktop {
+        _ = self;
+        return desktop_backend;
+    }
 
     // ---------------------------------------------------------------- tray
 
@@ -648,6 +684,22 @@ pub const App = struct {
         self.deferHome();
         self.theme = self.be.vtable.system_theme(self.be.ctx);
 
+        // Plugins come up after the backend is ready, so their setup may use
+        // the desktop APIs, and before the first window is shown, so the
+        // methods they bind are available to the very first page.
+        self.plugins.startAll(
+            self.arena.allocator(),
+            &self.ipc.registry,
+            self.desktopBackend(),
+            self.options.name,
+            self.options.version,
+        ) catch |e| {
+            log.err("plugin setup failed: {s}", .{@errorName(e)});
+            self.phase = .stopped;
+            self.be.vtable.deinit(self.be.ctx);
+            return e;
+        };
+
         // Run anything a listener queued before the loop existed.
         _ = self.queue.drain();
         self.emitReady();
@@ -658,6 +710,7 @@ pub const App = struct {
 
         self.phase = .stopped;
         self.runQuitListeners();
+        self.plugins.stopAll();
         self.be.vtable.deinit(self.be.ctx);
         if (self.exit_code != 0) return error.ExitCode;
     }
