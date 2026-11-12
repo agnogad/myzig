@@ -17,7 +17,7 @@ here only once it compiles, has tests, and has been run.
 | 3 | Desktop APIs: clipboard, dialogs, notifications, tray, menus, shortcuts | **Done** |
 | 4 | Native UI toolkit: layout, rendering, accessibility | **In progress** (layout, rasteriser, input done; accessibility pending) |
 | 5 | Command line: `new`, `generate`, `doctor` | **Done** |
-| 6 | Windows backend: Win32 + WebView2 | Not started |
+| 6 | Windows backend: Win32 + WebView2 | **Written, compiles for Windows, not yet run** |
 | 7 | macOS backend: AppKit + WKWebView | Not started |
 | 8 | Ecosystem: plugins, packaging, auto-update | Not started |
 
@@ -112,7 +112,12 @@ Still open in this milestone: accessibility (exposing the tree to AT-SPI),
 GPU rendering, and text beyond ASCII.
 * Native UI is available: `counter-native` and `native-ui` draw and take input
   with no web engine loaded.
-* The Windows and macOS backends return `NotSupported` from every entry point.
+* The Windows backend is written and compiles for `x86_64-windows-gnu`, but
+  **has never been run**: there is no Windows machine here. Win32 windows,
+  menus, DPI awareness, the software-rasterised surface, monitor enumeration
+  and the COM plumbing that brings up WebView2 are all present. Until someone
+  runs it on Windows, treat it as unverified.
+* The macOS backend returns `NotSupported` from every entry point.
 
 ## Milestone 5: the `myzig` command line
 

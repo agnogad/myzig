@@ -154,7 +154,13 @@ pub fn build(b: *std.Build) void {
 /// and so that optional symbol lookups resolve at link time when present.
 fn configureNative(mod: *std.Build.Module, target: std.Build.ResolvedTarget) void {
     mod.link_libc = true;
-    _ = target;
-    // Nothing is linked: every system library is dlopen'd. This keeps
-    // binaries small and lets MyZig start on systems missing a library.
+    // Nothing on Linux or macOS is linked: every system library is dlopen'd,
+    // which keeps binaries small and lets MyZig start on systems missing one.
+    //
+    // Windows is the exception. `ProcessPrng` is the only entropy source still
+    // in the CRT's reach, and it lives in `bcryptprimitives.dll`, which has to
+    // be named to get an import library.
+    if (target.result.os.tag == .windows) {
+        mod.linkSystemLibrary("bcryptprimitives", .{});
+    }
 }

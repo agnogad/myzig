@@ -38,6 +38,15 @@ var ticker: Ticker = .{};
 /// Sleeps without pulling in `std.Io`. The plugin thread only needs to wait,
 /// and `nanosleep` is the primitive the standard library uses underneath.
 fn sleepMs(ms: u64) void {
+    // `nanosleep` is the Unix primitive; Windows wants `Sleep`, which takes
+    // milliseconds directly.
+    if (@import("builtin").os.tag == .windows) {
+        const win = struct {
+            extern "kernel32" fn Sleep(ms: u32) callconv(.winapi) void;
+        };
+        win.Sleep(@intCast(ms));
+        return;
+    }
     const ts = std.posix.timespec{
         .sec = @intCast(ms / 1000),
         .nsec = @intCast((ms % 1000) * std.time.ns_per_ms),

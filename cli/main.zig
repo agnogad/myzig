@@ -283,6 +283,14 @@ fn runDoctor(ctx: Ctx) !void {
         @tagName(@import("builtin").target.cpu.arch),
     }));
 
+    // `doctor` inspects the machine it runs on, and what it looks for differs
+    // with the platform. Only the Linux checks exist so far; the Windows and
+    // macOS ones report that they are not written rather than lying about it.
+    if (@import("builtin").os.tag != .linux) {
+        try ctx.out("\n  libraries\n  (the Windows and macOS checks are not written yet)\n");
+        return;
+    }
+
     try ctx.out("\n  libraries\n");
     const checks = [_]struct { name: []const u8, lib: []const u8, needed: []const u8 }{
         .{ .name = "GTK 3", .lib = "libgtk-3.so.0", .needed = "web and native windows" },

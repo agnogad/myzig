@@ -107,5 +107,9 @@ test {
     _ = @import("webview/webview.zig");
     _ = @import("desktop/desktop.zig");
     _ = @import("plugins/plugins.zig");
-    _ = @import("platform/linux/ffi.zig");
+    // The platform FFI layer is only compiled for the platform it belongs to;
+    // importing it unconditionally would pull GTK into a Windows build.
+    if (@import("builtin").os.tag == .linux) {
+        _ = @import("platform/linux/ffi.zig");
+    }
 }

@@ -87,9 +87,8 @@ pub fn trace(comptime fmt: []const u8, args: anytype) void {
 
 fn writeStderr(a: []const u8, b: []const u8, c: []const u8, d: []const u8, e: []const u8) void {
     if (builtin.os.tag == .windows) {
-        // Avoid touching std.Io plumbing here; stderr is best effort.
-        std.debug.lockStdErr();
-        defer std.debug.unlockStdErr();
+        // `std.debug.print` writes to stderr itself and needs no lock of its
+        // own; Zig 0.17 removed `lockStdErr`.
         std.debug.print("{s}{s}{s}{s}{s}", .{ a, b, c, d, e });
         return;
     }

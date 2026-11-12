@@ -33,6 +33,23 @@ fn getPosix(key: []const u8) ?[]const u8 {
     return std.mem.sliceTo(v, 0);
 }
 
+/// The two Win32 calls this file needs. Zig 0.17's `std.os.windows` no longer
+/// declares them, and the project's style is to declare what it uses rather
+/// than depend on whichever subset the standard library ships.
+extern "kernel32" fn GetEnvironmentVariableW(
+    name: [*:0]const u16,
+    buffer: [*]u16,
+    size: u32,
+) callconv(.winapi) u32;
+
+extern "kernel32" fn ProcessPrng(buffer: [*]u8, length: usize) callconv(.winapi) i32;
+
+extern "kernel32" fn GetModuleFileNameW(
+    module: ?*anyopaque,
+    buffer: [*]u16,
+    size: u32,
+) callconv(.winapi) u32;
+
 fn getWindows(key: []const u8) ?[]const u8 {
     if (key.len == 0 or key.len > 512) return null;
     var wide_key: [257]u16 = undefined;
@@ -40,7 +57,7 @@ fn getWindows(key: []const u8) ?[]const u8 {
     wide_key[n] = 0;
 
     var buf: [32767]u16 = undefined;
-    const rc = std.os.windows.kernel32.GetEnvironmentVariableW(@ptrCast(&wide_key), @ptrCast(&buf), buf.len);
+    const rc = GetEnvironmentVariableW(@ptrCast(&wide_key), @ptrCast(&buf), buf.len);
     if (rc == 0) return null;
 
     // The result must outlive this call, so copy it into a static buffer.
@@ -86,9 +103,12 @@ fn posixSetenv(k: [*:0]const u8, v: [*:0]const u8, ow: c_int) c_int {
 pub fn selfExePath(buf: []u8) ![]const u8 {
     if (builtin.os.tag == .windows) {
         var wide: [std.fs.max_path_bytes / 2]u16 = undefined;
-        const n = std.os.windows.kernel32.GetModuleFileNameW(null, @ptrCast(&wide), wide.len);
+        const n = GetModuleFileNameW(null, @ptrCast(&wide), wide.len);
         if (n == 0 or n >= wide.len) return error.PathTooLong;
-        return std.unicode.utf16LeToUtf8(buf, wide[0..n]) catch error.PathTooLong;
+        // `utf16LeToUtf8` returns the number of bytes written, so the slice is
+        // taken from that count.
+        const written = std.unicode.utf16LeToUtf8(buf, wide[0..@as(usize, n)]) catch return error.PathTooLong;
+        return buf[0..written];
     }
     // /proc/self/exe on Linux and FreeBSD; _NSGetExecutablePath elsewhere.
     if (@import("builtin").os.tag == .linux) {
@@ -129,15 +149,9 @@ test "self exe path is absolute" {
 /// for a secret: there is no predictable fallback.
 pub fn secureRandom(buf: []u8) void {
     if (builtin.os.tag == .windows) {
-        var filled: usize = 0;
-        while (filled < buf.len) {
-            const n = std.os.windows.kernel32.RtlGenRandom(
-                buf.ptr + filled,
-                @intCast(buf.len - filled),
-            );
-            if (n == 0) @panic("no entropy source");
-            filled += n;
-        }
+        // `ProcessPrng` is the call Windows documents for this: it cannot
+        // fail, and it is what `std.Io`'s entropy source uses underneath.
+        if (ProcessPrng(buf.ptr, buf.len) == 0) @panic("no entropy source");
         return;
     }
     if (builtin.os.tag == .linux) {
