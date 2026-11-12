@@ -29,6 +29,7 @@ WebKitGTK 4.1 for pages; cairo for the native surface; X11 for global shortcuts.
 | Native UI surface | verified | GTK drawing area, software rasteriser |
 | Native UI input | verified | mouse press and release |
 | Accessibility | verified | AT-SPI over D-Bus: a reader walks the tree |
+| Wayland session | verified | a whole window, drawn and legible, captured with `grim` |
 
 Libraries are loaded with `std.DynLib` at the moment a feature needs them:
 
