@@ -62,7 +62,8 @@
     platform: "@@PLATFORM@@",
     windowId: WINDOW_ID,
 
-    call: function (method, ...args) {
+    call: function (method) {
+      var args = Array.prototype.slice.call(arguments, 1);
       var id = nextId++;
       return new Promise(function (resolve, reject) {
         pending.set(id, { resolve: resolve, reject: reject });
@@ -154,15 +155,14 @@
       var msg = list[i];
       if (!msg || typeof msg !== "object") continue;
       switch (msg.t) {
-        case "ok": {
+        case "ok":
           var p = pending.get(msg.id);
           if (p) {
             pending.delete(msg.id);
             p.resolve(msg.v);
           }
           break;
-        }
-        case "err": {
+        case "err":
           var q = pending.get(msg.id);
           if (q) {
             pending.delete(msg.id);
@@ -171,17 +171,15 @@
             q.reject(err);
           }
           break;
-        }
         case "ev":
           emit(msg.e, msg.d);
           break;
-        case "chunk": {
-          // A streamed response: each chunk resolves a progress callback the
+        case "chunk":
+          // A streamed response: each chunk calls a progress callback the
           // caller passed as an argument.
           var c = pending.get(msg.id);
           if (c && c.onchunk) c.onchunk(msg.d);
           break;
-        }
         default:
           break;
       }

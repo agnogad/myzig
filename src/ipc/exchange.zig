@@ -217,8 +217,7 @@ pub const Exchange = struct {
     }
 
     fn appendOk(self: *Exchange, out: *std.ArrayList(u8), id: u32, value: json.Value) !void {
-        if (out.items.len == 0) try out.append(self.allocator, '[');
-        if (out.items.len > 1) try out.append(self.allocator, ',');
+        if (out.items.len > 0) try out.append(self.allocator, ',');
         try out.appendSlice(self.allocator, "{\"t\":\"ok\",\"id\":");
         try self.appendU32(out, id);
         try out.appendSlice(self.allocator, ",\"v\":");
@@ -227,8 +226,7 @@ pub const Exchange = struct {
     }
 
     fn appendOkRaw(self: *Exchange, out: *std.ArrayList(u8), id: u32, text: []const u8) !void {
-        if (out.items.len == 0) try out.append(self.allocator, '[');
-        if (out.items.len > 1) try out.append(self.allocator, ',');
+        if (out.items.len > 0) try out.append(self.allocator, ',');
         try out.appendSlice(self.allocator, "{\"t\":\"ok\",\"id\":");
         try self.appendU32(out, id);
         try out.appendSlice(self.allocator, ",\"v\":");
@@ -243,8 +241,7 @@ pub const Exchange = struct {
         code: protocol.Code,
         message: []const u8,
     ) !void {
-        if (out.items.len == 0) try out.append(self.allocator, '[');
-        if (out.items.len > 1) try out.append(self.allocator, ',');
+        if (out.items.len > 0) try out.append(self.allocator, ',');
         try out.appendSlice(self.allocator, "{\"t\":\"err\",\"id\":");
         try self.appendU32(out, id);
         try out.appendSlice(self.allocator, ",\"c\":\"");
@@ -277,9 +274,13 @@ pub const Exchange = struct {
         // encode/decode round trip in the page.
         var code: std.ArrayList(u8) = .empty;
         defer code.deinit(self.allocator);
-        code.appendSlice(self.allocator, "window.__myzig && window.__myzig.receive(") catch return;
+        // `batch` holds the contents of one JSON array, without its brackets:
+        // each reply and event writes its own object, and the brackets belong
+        // here. A missing `]` makes the call an unterminated array literal, so
+        // every reply would be a parse error in the page.
+        code.appendSlice(self.allocator, "window.__myzig && window.__myzig.receive([") catch return;
         code.appendSlice(self.allocator, batch) catch return;
-        code.appendSlice(self.allocator, ")") catch return;
+        code.appendSlice(self.allocator, "])") catch return;
         _ = s.eval(s.ctx, window, code.items);
     }
 
@@ -301,14 +302,14 @@ pub const Exchange = struct {
             if (!subSetContains(entry.value_ptr, name)) continue;
 
             out.clearRetainingCapacity();
-            out.appendSlice(self.allocator, "[{\"t\":\"ev\",\"e\":") catch continue;
+            out.appendSlice(self.allocator, "{\"t\":\"ev\",\"e\":") catch continue;
             var tmp: std.ArrayList(u8) = .empty;
             defer tmp.deinit(self.allocator);
             encodeString(self.allocator, &tmp, name) catch continue;
             out.appendSlice(self.allocator, tmp.items) catch continue;
             out.appendSlice(self.allocator, ",\"d\":") catch continue;
             payload.encode(self.allocator, &out) catch continue;
-            out.appendSlice(self.allocator, "}]") catch continue;
+            out.appendSlice(self.allocator, "}") catch continue;
 
             self.send(window, out.items);
             sent += 1;
@@ -627,4 +628,57 @@ test "an event reaches the page as a single well-formed call" {
     var parsed = try json.parse(testing.allocator, inner);
     defer parsed.parser.deinit();
     try testing.expectEqual(@as(usize, 1), parsed.value.array.len);
+}
+
+test "a reply reaches the page as a single well-formed call" {
+    // Regression: `send` wrapped the reply in `receive(` ... `)`, but the reply
+    // builder never closed the JSON array it opened, so every answer arrived as
+    // `receive([{...})` and the page threw a SyntaxError instead of resolving
+    // the call. A structured clone and a round trip are both checked.
+    var scored = Scored{};
+    var ex = Exchange.init(testing.allocator);
+    defer ex.deinit();
+    try ex.registry.add(.{ .name = "Math.add", .invoke = arithAdd, .arity = 2, .ctx = &scored });
+
+    var rec = Recorder{};
+    defer rec.deinit(testing.allocator);
+    newExchange(&ex, &rec);
+
+    ex.deliver(1, "{\"t\":\"call\",\"id\":3,\"m\":\"Math.add\",\"a\":[9,3]}");
+    try testing.expectEqual(@as(usize, 1), rec.calls);
+
+    const code = rec.last();
+    try testing.expect(std.mem.startsWith(u8, code, "window.__myzig && window.__myzig.receive(["));
+    try testing.expect(std.mem.endsWith(u8, code, "])"));
+
+    const inner = code["window.__myzig && window.__myzig.receive(".len .. code.len - 1];
+    var parsed = try json.parse(testing.allocator, inner);
+    defer parsed.parser.deinit();
+    try testing.expectEqual(@as(usize, 1), parsed.value.array.len);
+    try testing.expectEqualStrings("ok", parsed.value.array[0].get("t").?.string);
+    try testing.expectEqualStrings("12", parsed.value.array[0].get("v").?.number);
+}
+
+test "two replies in one batch are separated by exactly one comma" {
+    // A batch carries several messages: the first must not start with a comma
+    // and the bracket bookkeeping must not leak into the JSON.
+    var scored = Scored{};
+    var ex = Exchange.init(testing.allocator);
+    defer ex.deinit();
+    try ex.registry.add(.{ .name = "Math.add", .invoke = arithAdd, .arity = 2, .ctx = &scored });
+
+    var rec = Recorder{};
+    defer rec.deinit(testing.allocator);
+    newExchange(&ex, &rec);
+
+    ex.deliver(1, "{\"t\":\"batch\",\"m\":[{\"t\":\"call\",\"id\":1,\"m\":\"Math.add\",\"a\":[8,2]},{\"t\":\"call\",\"id\":2,\"m\":\"Math.add\",\"a\":[6,3]}]}");
+    try testing.expectEqual(@as(usize, 1), rec.calls);
+
+    const code = rec.last();
+    const inner = code["window.__myzig && window.__myzig.receive(".len .. code.len - 1];
+    var parsed = try json.parse(testing.allocator, inner);
+    defer parsed.parser.deinit();
+    try testing.expectEqual(@as(usize, 2), parsed.value.array.len);
+    try testing.expectEqualStrings("10", parsed.value.array[0].get("v").?.number);
+    try testing.expectEqualStrings("9", parsed.value.array[1].get("v").?.number);
 }

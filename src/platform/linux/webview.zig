@@ -147,6 +147,10 @@ pub fn createFor(id: u32, parent: ffi.GtkWindow, opts: backend.WindowOptions) Er
         // NUL-terminated buffer rather than a fixed stack one.
         const src = ffi.dupeCStr(gpa, script_src) catch return error.OutOfMemory;
         defer gpa.free(src);
+        log.debug("bridge script: {d} bytes, first newline at {d}", .{
+            src.len,
+            std.mem.indexOfScalar(u8, src, '\n') orelse 0,
+        });
         const script = ffi.webkit_user_script_new(
             src.ptr,
             ffi.WEBKIT_USER_CONTENT_INJECT_TOP_FRAME,

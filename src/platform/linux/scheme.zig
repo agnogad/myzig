@@ -84,6 +84,7 @@ fn onRequest(request: *anyopaque) void {
         respondError(request, 404);
         return;
     };
+    log.debug("myzig:// {s} -> {s} ({d} bytes)", .{ path, file.mime, file.data.len });
     respond(request, file.data, file.mime);
 }
 
@@ -117,12 +118,17 @@ fn respond(request: *anyopaque, data: []const u8, mime: []const u8) void {
         respondError(request, 500);
         return;
     };
-    defer ffi.g_bytes_unref(bytes);
     const stream = ffi.g_memory_input_stream_new_from_bytes(bytes) orelse {
         respondError(request, 500);
         return;
     };
+    // `finish` takes its own reference on the stream and reads it
+    // asynchronously. Releasing ours here is therefore safe, but releasing it
+    // before `finish` — as a `defer` above the call would — leaves WebKit
+    // reading a freed stream. The static bytes are never freed at all: the
+    // frontend lives in the app arena.
     defer ffi.g_object_unref(@ptrCast(stream));
+    defer ffi.g_bytes_unref(bytes);
     const m = ffi.CStr.init(mime);
     ffi.webkit_uri_scheme_request_finish(request, stream, @intCast(data.len), m.ptr());
 }

@@ -116,6 +116,9 @@ test "the template has no unresolved known tokens" {
     try std.testing.expect(std.mem.indexOf(u8, script, "0x") == null or true);
     try std.testing.expect(std.mem.indexOf(u8, script, "\"deadbeefcafe1234\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, script, "var WINDOW_ID = 7;") != null);
+    // The newlines of the template must survive: without them the whole script
+    // becomes one line and WebKit reports a syntax error at a confusing column.
+    try std.testing.expect(std.mem.indexOfScalar(u8, script, '\n') != null);
     try std.testing.expect(std.mem.indexOf(u8, script, message_handler_name) != null);
     for ([_][]const u8{ "@@HANDLER@@", "@@SECRET@@", "@@WINDOW_ID@@", "@@VERSION@@", "@@PLATFORM@@" }) |tok| {
         try std.testing.expect(std.mem.indexOf(u8, script, tok) == null);
