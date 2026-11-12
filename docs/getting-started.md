@@ -133,3 +133,14 @@ MyZig's own rasteriser. See [native-ui.md](native-ui.md).
 * [native-ui.md](native-ui.md) — the native toolkit.
 * [plugins.md](plugins.md) — packaging services.
 * [memory-management.md](memory-management.md) — who owns what.
+
+## Cross-compiling
+
+`zig build -Dtarget=...` installs into the same `zig-out/bin` as a native build
+and replaces it, so a Windows or macOS cross-compile leaves a file that cannot
+run on the machine that produced it. The build prints a warning when this
+happens; `zig build install --prefix zig-out/windows` keeps both.
+
+A macOS cross-compile also needs the platform SDK, which a Linux host does not
+have. The backend compiles, because the Objective-C runtime is opened by name,
+but the frameworks are not linked.

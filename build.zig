@@ -4,6 +4,22 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // A cross-compile installs into the same `zig-out/bin` as a native build,
+    // so `zig build -Dtarget=x86_64-windows-gnu` overwrites the local binary
+    // with a PE file that cannot run here. That is how a passing build turned
+    // into "cannot execute binary file" during development. Saying it once, at
+    // configure time, is cheaper than finding out at run time.
+    if (target.result.os.tag != @import("builtin").target.os.tag) {
+        const os_name = @tagName(target.result.os.tag);
+        std.debug.print(
+            "\nnote: cross-compiling for {s}. This writes into the same zig-out/bin\n" ++
+                "      as a native build and replaces it. Use\n" ++
+                "        zig build install --prefix zig-out/{s}\n" ++
+                "      to keep both.\n\n",
+            .{ os_name, os_name },
+        );
+    }
+
     // Backend selection. Empty means "choose from the target OS". A test build
     // passes `testing` so the framework runs with no display attached.
     const backend_opt = b.option(
