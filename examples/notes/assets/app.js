@@ -117,10 +117,11 @@ myzig.on('notes:changed', () => {
   });
 });
 
-// A menu command with New focus the title, so the keyboard path and the menu
-// path end in the same place.
-myzig.on('menu:command', (id) => {
-  if (id === 'file.new') titleInput.focus();
+// The Zig side resets the form after a note was made from the menu.
+myzig.on('notes:form', () => {
+  titleInput.value = '';
+  bodyInput.value = '';
+  titleInput.focus();
 });
 
 refresh().catch((e) => {

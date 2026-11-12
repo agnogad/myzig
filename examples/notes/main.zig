@@ -148,19 +148,14 @@ fn listNotes(ctx: ?*anyopaque, args: myzig.ipc.Args) myzig.ipc.Result {
     return myzig.ipc.Result.successRaw(state.toJson());
 }
 
-fn addNote(ctx: ?*anyopaque, args: myzig.ipc.Args) myzig.ipc.Result {
-    const state: *State = @ptrCast(@alignCast(ctx.?));
-    var a = args;
-    // Bounded on both sides: a title is a title, and a 2 GB one is a bug in the
-    // caller rather than a note to store.
-    const title = a.stringBounded(200) catch |e| return myzig.ipc.Args.toResult(e);
-    const body = a.stringBounded(8000) catch |e| return myzig.ipc.Args.toResult(e);
-
-    const owned_title = state.gpa.dupe(u8, title) catch
-        return myzig.ipc.Result.fail(.internal, "out of memory");
+/// Adds a note and returns its id, or an error the caller can report.
+///
+/// The page and the File menu both come through here: a menu click that made a
+/// note some other way could disagree with the page about what a note is.
+fn createNote(state: *State, title: []const u8, body: []const u8) error{OutOfMemory}!u64 {
+    const owned_title = try state.gpa.dupe(u8, title);
     errdefer state.gpa.free(owned_title);
-    const owned_body = state.gpa.dupe(u8, body) catch
-        return myzig.ipc.Result.fail(.internal, "out of memory");
+    const owned_body = try state.gpa.dupe(u8, body);
 
     var note = Note{ .id = state.next_id, .title = owned_title, .body = owned_body };
     // An untitled note still needs a name in the list, or the row is blank and
@@ -169,7 +164,7 @@ fn addNote(ctx: ?*anyopaque, args: myzig.ipc.Args) myzig.ipc.Result {
         state.gpa.free(note.title);
         note.title = state.gpa.dupe(u8, "Untitled") catch {
             state.gpa.free(note.body);
-            return myzig.ipc.Result.fail(.internal, "out of memory");
+            return error.OutOfMemory;
         };
     }
     state.next_id += 1;
@@ -177,7 +172,7 @@ fn addNote(ctx: ?*anyopaque, args: myzig.ipc.Args) myzig.ipc.Result {
     state.notes.append(state.gpa, note) catch {
         state.gpa.free(note.title);
         state.gpa.free(note.body);
-        return myzig.ipc.Result.fail(.internal, "out of memory");
+        return error.OutOfMemory;
     };
     state.dirty = true;
     // Written now rather than at exit: a program that is killed instead of
@@ -187,8 +182,21 @@ fn addNote(ctx: ?*anyopaque, args: myzig.ipc.Args) myzig.ipc.Result {
     // The page is told, so a change made from the menu reaches a page that did
     // not ask for it.
     _ = state.app.emit("notes:changed", .{ .string = state.toJson() });
+    return note.id;
+}
 
-    const text = std.fmt.bufPrint(&scratch, "{d}", .{note.id}) catch "0";
+fn addNote(ctx: ?*anyopaque, args: myzig.ipc.Args) myzig.ipc.Result {
+    const state: *State = @ptrCast(@alignCast(ctx.?));
+    var a = args;
+    // Bounded on both sides: a title is a title, and a 2 GB one is a bug in the
+    // caller rather than a note to store.
+    const title = a.stringBounded(200) catch |e| return myzig.ipc.Args.toResult(e);
+    const body = a.stringBounded(8000) catch |e| return myzig.ipc.Args.toResult(e);
+
+    const id = createNote(state, title, body) catch
+        return myzig.ipc.Result.fail(.internal, "out of memory");
+
+    const text = std.fmt.bufPrint(&scratch, "{d}", .{id}) catch "0";
     return myzig.ipc.Result.success(.{ .number = text });
 }
 
@@ -385,9 +393,16 @@ fn onMenu(state: *State, window: u32, payload: myzig.json.Value) void {
     };
 
     if (std.mem.eql(u8, id, "file.new")) {
-        // The same path the page's button takes: one way to add a note, used
-        // by two callers, so they cannot drift apart.
-        _ = state.app.emit("notes:create", .null);
+        // File > New Note makes a note, the same one the page's button makes.
+        // It used to emit an event nothing listened to, which looked like a
+        // menu item and did nothing.
+        _ = createNote(state, "Untitled", "") catch {
+            myzig.log.err("notes: out of memory adding a note from the menu", .{});
+            return;
+        };
+        // The page clears a form it was told to clear; without this the title
+        // from the last note would stay in the box.
+        _ = state.app.emit("notes:form", .{ .string = "reset" });
         return;
     }
     if (std.mem.eql(u8, id, "file.save")) {
@@ -502,8 +517,10 @@ pub fn main(init: std.process.Init) !void {
 /// different path from the page's subscription.
 fn runMenuSelftest(ctx: ?*anyopaque) void {
     const state: *State = @ptrCast(@alignCast(ctx.?));
-    const sent = state.app.emit("menu:command", .{ .string = "file.save" });
-    myzig.log.debug("notes: selftest emitted a menu command to {d} page listeners", .{sent});
+    // The same event a File > New Note click emits, so what runs is the real
+    // command and not a copy of it.
+    const sent = state.app.emit("menu:command", .{ .string = "file.new" });
+    myzig.log.debug("notes: selftest emitted file.new to {d} page listeners", .{sent});
 }
 
 /// The I/O handle a handler needs. A handler is called from the loop, not from

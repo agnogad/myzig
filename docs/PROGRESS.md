@@ -70,6 +70,13 @@ source file and in the example that exercises it:
   daemon gets `false`, not a silent drop. Not yet verified on a real session.
 * Global shortcuts are X11 only. Wayland forbids global grabs by design, so
   `registerShortcut` returns `error.NotSupported` there.
+## The application example
+
+`examples/notes` is a complete program — persistent notes, a menu bar, a tray
+icon and typed IPC — written to be the thing the framework is judged against.
+It found five bugs and two genuinely missing APIs (`App.listen`,
+`AppOptions.io`); see the commit log for the list.
+
 ## Milestone 4: the native UI toolkit
 
 A window can now be drawn entirely by MyZig, with no page and no WebKit.
