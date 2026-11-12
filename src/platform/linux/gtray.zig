@@ -183,6 +183,29 @@ fn loadX11() ?*X11 {
     return &x11.?;
 }
 
+/// Whether the process is talking to a Wayland compositor rather than an X
+/// server. `GDK_BACKEND` wins when it is set, because a Wayland session can run
+/// an X11 application through XWayland and the two must not be confused.
+fn isWayland() bool {
+    if (comptime @import("builtin").os.tag != .linux) return false;
+    if (getenv("GDK_BACKEND")) |b| {
+        if (std.mem.eql(u8, b, "wayland")) return true;
+        if (std.mem.eql(u8, b, "x11")) return false;
+    }
+    if (getenv("WAYLAND_DISPLAY") != null) {
+        // A nested X11 application inside XWayland has DISPLAY set and no
+        // Wayland socket of its own, so the socket is what decides.
+        return getenv("DISPLAY") == null;
+    }
+    return false;
+}
+
+/// `getenv` is `std.c.getenv` on Linux; the value is borrowed and not freed.
+fn getenv(name: [*:0]const u8) ?[]const u8 {
+    const p = std.c.getenv(name) orelse return null;
+    return std.mem.span(p);
+}
+
 /// The X display GDK already opened, so a grab uses the same connection. GDK is
 /// loaded by the backend, so this symbol is present whenever a window exists.
 var gdk_lib: ?std.DynLib = null;
@@ -227,6 +250,12 @@ var shortcuts: std.ArrayListUnmanaged(Shortcut) = .empty;
 /// global grabs by design or through a portal), and `error.AlreadyTaken` when
 /// another client holds the same combination.
 pub fn registerShortcut(allocator: std.mem.Allocator, sc: Shortcut) error{ NotSupported, AlreadyTaken, OutOfMemory }!void {
+    // A Wayland session has no X display, and GDK's X11 accessor is still
+    // present in the shared object — it returns a pointer that is not a
+    // `Display`, and passing it to X11 segfaults inside XKeysymToKeycode.
+    // Refusing here is what the documentation already promised.
+    if (isWayland()) return error.NotSupported;
+
     const get_display = loadGdk() orelse return error.NotSupported;
     const lib = loadX11() orelse return error.NotSupported;
     const display = get_display() orelse return error.NotSupported;
