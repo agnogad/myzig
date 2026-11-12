@@ -120,7 +120,21 @@ pub const cell_height: i32 = 8;
 
 /// How wide `text` renders at `scale`, in DIPs.
 pub fn textWidth(text_value: []const u8, scale: i32) i32 {
-    return @as(i32, @intCast(text_value.len)) * cell_width * @max(1, scale);
+    // The text is UTF-8 and the font is fixed-pitch, so the width is the number
+    // of code points, not of bytes.
+    return @as(i32, @intCast(codePointCount(text_value))) * cell_width * @max(1, scale);
+}
+
+/// The number of UTF-8 code points in `text`. A malformed byte counts as one,
+/// which matches what `drawText` does with it.
+fn codePointCount(text_value: []const u8) usize {
+    var n: usize = 0;
+    var rest = text_value;
+    while (rest.len > 0) : (n += 1) {
+        const len = std.unicode.utf8ByteSequenceLength(rest[0]) catch 1;
+        rest = rest[@min(len, rest.len)..];
+    }
+    return n;
 }
 
 pub fn textHeight(scale: i32) i32 {
@@ -251,8 +265,18 @@ fn drawText(surface: Surface, t: Text, scale: i32) void {
     const pen_y = t.origin.y * scale;
     const px = @max(1, scale);
 
-    for (t.text) |ch| {
-        const glyph = font.glyph(ch);
+    // The text is UTF-8, so a character can be up to four bytes; the pen
+    // advances one cell per code point, not per byte.
+    var rest = t.text;
+    while (rest.len > 0) {
+        const len = std.unicode.utf8ByteSequenceLength(rest[0]) catch 1;
+        const cp: u21 = if (len > rest.len)
+            rest[0]
+        else
+            std.unicode.utf8Decode(rest[0..len]) catch rest[0];
+        rest = rest[@min(len, rest.len)..];
+
+        const glyph = font.glyph(cp);
         var row: usize = 0;
         while (row < 8) : (row += 1) {
             const bits = glyph[row];
@@ -366,6 +390,10 @@ test "an empty string draws nothing" {
 test "text width accounts for scale" {
     try std.testing.expectEqual(@as(i32, 8), textWidth("A", 1));
     try std.testing.expectEqual(@as(i32, 24), textWidth("ABC", 1));
+    // "şiğü" is four characters and seven bytes: the width follows the
+    // characters, not the encoding.
+    try std.testing.expectEqual(@as(i32, 4 * 8), textWidth("şiğü", 1));
+    try std.testing.expectEqual(@as(usize, 7), "şiğü".len);
     try std.testing.expectEqual(@as(i32, 48), textWidth("ABC", 2));
 }
 

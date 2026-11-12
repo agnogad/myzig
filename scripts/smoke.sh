@@ -89,7 +89,15 @@ main() {
     local names=("$@")
     if [ ${#names[@]} -eq 0 ]; then
         names=()
-        while IFS= read -r n; do names+=("$n"); done < <(ls "$ROOT/zig-out/bin")
+        # A cross-compile for Windows leaves `.exe` and `.pdb` files beside
+        # the native ones; neither can run here, so both are skipped. Debug
+        # symbol files are not programs at all.
+        while IFS= read -r n; do
+            case "$n" in
+                *.exe|*.pdb|*.dll|*.dSYM) continue ;;
+            esac
+            names+=("$n")
+        done < <(ls "$ROOT/zig-out/bin")
     fi
 
     for n in "${names[@]}"; do

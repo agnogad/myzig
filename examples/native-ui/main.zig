@@ -47,6 +47,9 @@ fn draw(ctx: *anyopaque, builder: *anyopaque, size: myzig.platform.backend.DrawR
     const line = std.fmt.bufPrint(&buf, "Clicks: {d}", .{state.clicks}) catch "Clicks: ?";
     b.text(.{ .x = 16, .y = 72, .width = 240, .height = 16 }, line, ink, 1) catch return;
     b.text(.{ .x = 16, .y = 104, .width = 320, .height = 8 }, "No page. No WebKit. Just Zig.", muted, 1) catch return;
+    // The font covers Latin-1 and the letters Turkish adds, so an interface
+    // can be written in its own language.
+    b.text(.{ .x = 16, .y = 128, .width = 400, .height = 8 }, "Türkçe: ışık, çğüşö, İstanbul", muted, 1) catch return;
 
     // Lay the buttons out with the same engine the rest of the toolkit uses, so
     // their frames come from the layout rather than from hand-added offsets.

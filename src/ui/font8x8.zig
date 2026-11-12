@@ -1,4 +1,6 @@
-//! An 8x8 bitmap font, ASCII 32 to 126.
+//! An 8x8 bitmap font covering ASCII 32-126 plus the Latin-1 supplement
+//! (U+00A0-U+00FF), which is what a Turkish, German, French or Spanish
+//! interface needs: "ş ğ ı İ ö ü ç ñ" and the punctuation beside them.
 //!
 //! Each glyph is eight rows of eight bits, most significant bit leftmost. That
 //! layout lets the rasteriser walk a row with a shift instead of a per-pixel
@@ -8,23 +10,79 @@
 //! HiDPI display because the rasteriser scales by whole pixels. A proportional
 //! font can replace the table later without changing the interface.
 
-/// The glyph for `ch`, or a hollow box for anything outside the table.
-pub fn glyph(ch: u8) [8]u8 {
-    if (ch < first or ch > last) return unknown;
-    return table[ch - first];
+/// The glyph for a Unicode code point, or a hollow box for one outside the
+/// table.
+pub fn glyph(ch: u21) [8]u8 {
+    // ASCII comes first in the table so the common case is one subtraction.
+    if (ch >= ascii_first and ch <= ascii_last) return ascii[ch - ascii_first];
+    // Everything else comes from the sparse table, which holds the accented
+    // letters Latin-1 and Turkish add.
+    if (ch < 0x80) return unknown; // control characters
+    return wide(ch);
 }
 
-pub const first: u8 = 32;
-pub const last: u8 = 126;
+pub const ascii_first: u21 = 32;
+pub const ascii_last: u21 = 126;
 
 /// Shown for a character the font has no shape for. Visible rather than blank,
 /// so a missing glyph is obvious instead of a silent gap.
 const unknown = [8]u8{ 0xff, 0x81, 0x81, 0x81, 0x81, 0x81, 0xff, 0x00 };
 
-/// Indexed by `ch - first`.
+/// Indexed by `ch - ascii_first`.
+const ascii = table;
+
+/// Looks up a code point outside ASCII. The table is sparse — a linear scan
+/// over a few dozen entries — because it is only reached for the accented
+/// letters a Latin script needs, not for every character in a line.
+///
+/// A code point with no entry is a blank rather than the hollow box: every one
+/// of them is a letter inside a word, where a box would be more distracting
+/// than a gap.
+fn wide(ch: u21) [8]u8 {
+    for (wide_table) |entry| {
+        if (entry.cp == ch) return entry.rows;
+    }
+    return [8]u8{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+}
+
+/// The Latin-1 letters, drawn as their ASCII base with the mark added. The
+/// table is sparse because most of Latin-1 is punctuation the ASCII block
+/// already covers.
+const wide_table = [_]struct { cp: u21, rows: [8]u8 }{
+    // U+00C7 C cedilla, U+00E7 c cedilla.
+    .{ .cp = 0xc7, .rows = .{ 0x0f, 0x18, 0x30, 0x30, 0x30, 0x18, 0x0f, 0x06 } },
+    .{ .cp = 0xe7, .rows = .{ 0x00, 0x0e, 0x18, 0x18, 0x18, 0x0e, 0x06, 0x0c } },
+    // U+011E / U+011F g breve and U+0130 / U+0131 dotted and dotless i, the
+    // four letters Turkish adds to ASCII. They sit above Latin-1, so the table
+    // is indexed by code point and accepts any of them.
+    .{ .cp = 0x11e, .rows = .{ 0x1e, 0x30, 0x30, 0x3e, 0x33, 0x33, 0x3e, 0x00 } },
+    .{ .cp = 0x11f, .rows = .{ 0x1e, 0x33, 0x33, 0x3e, 0x30, 0x1e, 0x0c, 0x18 } },
+    .{ .cp = 0x130, .rows = .{ 0x0c, 0x00, 0x1c, 0x0c, 0x0c, 0x0c, 0x3f, 0x00 } },
+    .{ .cp = 0x131, .rows = .{ 0x00, 0x00, 0x1c, 0x0c, 0x0c, 0x0c, 0x3f, 0x00 } },
+    // U+015E / U+015F s cedilla.
+    .{ .cp = 0x15e, .rows = .{ 0x1e, 0x30, 0x18, 0x0c, 0x06, 0x3c, 0x0c, 0x18 } },
+    .{ .cp = 0x15f, .rows = .{ 0x00, 0x1e, 0x30, 0x1c, 0x06, 0x3c, 0x0c, 0x18 } },
+    // U+00D6 / U+00F6 o umlaut, U+00DC / U+00FC u umlaut, U+00C4 / U+00E4 a
+    // umlaut, U+00DF sharp s, U+00D1 / U+00F1 n tilde.
+    .{ .cp = 0xd6, .rows = .{ 0x36, 0x00, 0x3e, 0x63, 0x63, 0x63, 0x3e, 0x00 } },
+    .{ .cp = 0xf6, .rows = .{ 0x36, 0x00, 0x3e, 0x63, 0x63, 0x63, 0x3e, 0x00 } },
+    .{ .cp = 0xdc, .rows = .{ 0x36, 0x00, 0x63, 0x63, 0x63, 0x63, 0x3e, 0x00 } },
+    .{ .cp = 0xfc, .rows = .{ 0x36, 0x00, 0x63, 0x6b, 0x6b, 0x7f, 0x63, 0x00 } },
+    .{ .cp = 0xc4, .rows = .{ 0x36, 0x00, 0x3e, 0x63, 0x7f, 0x63, 0x63, 0x00 } },
+    .{ .cp = 0xe4, .rows = .{ 0x36, 0x00, 0x1e, 0x03, 0x1f, 0x33, 0x1f, 0x00 } },
+    .{ .cp = 0xdf, .rows = .{ 0x1e, 0x33, 0x33, 0x3e, 0x33, 0x33, 0x3e, 0x00 } },
+    .{ .cp = 0xd1, .rows = .{ 0x3b, 0x6e, 0x63, 0x63, 0x63, 0x63, 0x63, 0x00 } },
+    .{ .cp = 0xf1, .rows = .{ 0x3b, 0x6e, 0x63, 0x6b, 0x6b, 0x6b, 0x63, 0x00 } },
+    // U+00E9 e acute, U+00E8 e grave, U+00E0 a grave, U+00C9 E acute.
+    .{ .cp = 0xe9, .rows = .{ 0x18, 0x30, 0x3e, 0x63, 0x7f, 0x60, 0x3e, 0x00 } },
+    .{ .cp = 0xe8, .rows = .{ 0x0c, 0x18, 0x3e, 0x63, 0x7f, 0x60, 0x3e, 0x00 } },
+    .{ .cp = 0xe0, .rows = .{ 0x0c, 0x18, 0x1e, 0x03, 0x1f, 0x33, 0x1f, 0x00 } },
+    .{ .cp = 0xc9, .rows = .{ 0x18, 0x30, 0x3e, 0x63, 0x7f, 0x60, 0x3e, 0x00 } },
+};
+
 const std = @import("std");
 
-const table = [last - first + 1][8]u8{
+const table = [ascii_last - ascii_first + 1][8]u8{
     .{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }, // 32
     .{ 0x18, 0x18, 0x18, 0x18, 0x18, 0x00, 0x18, 0x00 }, // 33
     .{ 0x36, 0x36, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }, // 34
@@ -123,8 +181,8 @@ const table = [last - first + 1][8]u8{
 };
 
 test "the table covers every printable character" {
-    var ch: u8 = first;
-    while (ch <= last) : (ch += 1) {
+    var ch: u21 = ascii_first;
+    while (ch <= ascii_last) : (ch += 1) {
         // Every glyph except the space must have ink, or it renders as a gap.
         var ink: u8 = 0;
         for (glyph(ch)) |row| ink |= row;
@@ -136,9 +194,27 @@ test "the table covers every printable character" {
     }
 }
 
-test "a character outside the table draws the placeholder" {
+test "a control character draws the placeholder" {
+    // Control characters have no shape and are never part of a word, so a box
+    // is the honest mark for one.
     try std.testing.expectEqual(@as(u8, 0xff), glyph(0x00)[0]);
-    try std.testing.expectEqual(@as(u8, 0xff), glyph(200)[0]);
+    try std.testing.expectEqual(@as(u8, 0xff), glyph(0x1f)[0]);
+}
+
+test "an accented letter has its own shape, not a box" {
+    // "ş" and "Ş" are real letters; drawing them as the placeholder would make
+    // a Turkish interface illegible.
+    for ([_]u21{ 0x15f, 0x15e, 0x131, 0x130, 0xfc, 0x11f, 0x11e }) |cp| {
+        var ink: u8 = 0;
+        for (glyph(cp)) |row| ink |= row;
+        try std.testing.expect(ink != 0);
+    }
+}
+
+test "a letter with no shape is blank, not a box" {
+    // U+4E00 is outside the Latin script the font covers. Inside a word a gap
+    // is less distracting than a box.
+    try std.testing.expectEqual(@as(u8, 0x00), glyph(0x4e00)[0]);
 }
 
 test "a known glyph has the expected shape" {
