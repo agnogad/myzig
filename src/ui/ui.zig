@@ -18,6 +18,11 @@ pub const Color = geometry.Color;
 pub const layout = @import("layout.zig");
 pub const canvas = @import("canvas.zig");
 
+/// What a screen reader is told about a window. A native surface is pixels to
+/// everyone else; this is the structure that makes it navigable.
+pub const accessibility = @import("accessibility/a11y.zig");
+pub const a11y = accessibility;
+
 /// The drawing list a native surface receives.
 pub const Builder = canvas.Builder;
 pub const Command = canvas.Command;

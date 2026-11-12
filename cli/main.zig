@@ -342,7 +342,11 @@ fn runPackage(ctx: Ctx, args: anytype) !void {
     try writeFile(ctx, dir, exe_dest, data);
     // `writeFile` creates the copy with the default mode, which is readable but
     // not executable. A bundle whose program cannot run is not a bundle.
-    dir.setFilePermissions(ctx.io, exe_dest, std.Io.File.Permissions.fromMode(0o755), .{}) catch {};
+    // Unix has an executable bit; Windows does not, so there is nothing to set
+    // there and `fromMode` is not even defined.
+    if (@import("builtin").os.tag != .windows) {
+        dir.setFilePermissions(ctx.io, exe_dest, std.Io.File.Permissions.fromMode(0o755), .{}) catch {};
+    }
 
     var desktop_buf: [1024]u8 = undefined;
     const desktop = std.fmt.bufPrint(&desktop_buf,

@@ -32,6 +32,7 @@ const errors = @import("../../errors.zig");
 const events = @import("../../events.zig");
 const app_mod = @import("../../app.zig");
 const log = @import("../../log.zig");
+const atspi = @import("atspi.zig");
 const window_mod = @import("../../window.zig");
 
 const env = @import("../../utils/env.zig");
@@ -179,10 +180,30 @@ fn deinit(ctx: *anyopaque) void {
 fn run(ctx: *anyopaque) errors.InitError!void {
     const self = selfOf(ctx);
     if (!self.initialised) return errors.InitError.PlatformUnavailable;
+
+    // A D-Bus message does not wake GTK's loop, so the accessibility bridge is
+    // polled from a *timeout* source. An idle source would be wrong: an idle
+    // callback that returns true is queued again immediately and starves the
+    // loop of the cycles that draw and handle input, which left every window
+    // blank. A timeout yields between calls.
+    _ = ffi.g_timeout_add(a11y_poll_ms, @ptrCast(&a11yIdle), null);
+
     if (self.main_loop) |loop| {
         ffi.g_main_loop_run(loop);
     }
 }
+
+/// Answers whatever an accessibility client asked since the last idle.
+fn a11yIdle(_: ?ffi.gpointer) callconv(.c) ffi.gboolean {
+    atspi.dispatch();
+    // Returning true keeps the source installed.
+    return 1;
+}
+
+/// How often an accessibility client's question is picked up. A screen reader
+/// waits tens of milliseconds for an answer, so polling every few is invisible
+/// to it and costs nothing measurable when nothing is asked.
+const a11y_poll_ms: c_uint = 30;
 
 fn quit(ctx: *anyopaque) void {
     const self = selfOf(ctx);

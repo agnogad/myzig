@@ -834,6 +834,7 @@ pub const App = struct {
         state.closable = opts.closable;
 
         state.native_draw = opts.native_draw;
+        state.a11y = opts.a11y;
 
         var secret_bytes: [8]u8 = undefined;
         env.secureRandom(&secret_bytes);
@@ -896,6 +897,7 @@ pub const App = struct {
             .modal = opts.modal,
             .secret = state.secret,
             .native_draw = self.windows[slot].?.native_draw,
+            .a11y = self.windows[slot].?.a11y,
         };
 
         if (self.phase == .running) {

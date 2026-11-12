@@ -136,6 +136,19 @@ pub const WindowOptions = struct {
     /// How a native window paints itself. The framework calls it once per frame
     /// with a builder to fill; see `ui.canvas`.
     native_draw: ?NativeDraw = null,
+    /// How the window describes itself to a screen reader. Called once per
+    /// frame, beside `native_draw`, with a `ui.accessibility.Builder` to fill.
+    /// Left null, the window is an opaque rectangle to accessibility clients.
+    a11y: ?AccessibleDraw = null,
+};
+
+/// A callback that describes a window's interface to a screen reader.
+///
+/// It receives a `ui.accessibility.Builder` as an opaque pointer, for the same
+/// reason `NativeDraw` does: this file must not depend on the toolkit.
+pub const AccessibleDraw = struct {
+    func: *const fn (ctx: *anyopaque, builder: *anyopaque, size: DrawRect) void,
+    ctx: *anyopaque,
 };
 
 /// A drawing callback for a native window.

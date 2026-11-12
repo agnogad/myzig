@@ -28,6 +28,7 @@ WebKitGTK 4.1 for pages; cairo for the native surface; X11 for global shortcuts.
 | Global shortcuts | verified | X11 key grab |
 | Native UI surface | verified | GTK drawing area, software rasteriser |
 | Native UI input | verified | mouse press and release |
+| Accessibility | verified | AT-SPI over D-Bus: a reader walks the tree |
 
 Libraries are loaded with `std.DynLib` at the moment a feature needs them:
 
@@ -37,6 +38,7 @@ Libraries are loaded with `std.DynLib` at the moment a feature needs them:
 | `libwebkit2gtk-4.1.so.0` | the first page window is created |
 | `libcairo.so.2` | the first native surface is created |
 | `libX11.so.6` | the first global shortcut is bound |
+| `libdbus-1.so.3` | a window first publishes an accessibility tree |
 
 So a native-only application never maps a web engine, and a page-only
 application never maps cairo.

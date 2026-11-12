@@ -47,11 +47,11 @@ stubs that return `NotSupported` from every entry point; they are listed in
 | Clipboard, dialogs, notifications, menus, tray, global shortcuts | works |
 | Native UI: layout, software rasteriser, bitmap text, mouse input | works |
 | Plugins | works |
-| `myzig` command line: `new`, `generate`, `doctor` | works |
-| Windows backend (Win32 + WebView2) | not started |
+| `myzig` command line: `new`, `generate`, `package`, `doctor` | works |
+| Windows backend (Win32 + WebView2) | compiles for Windows, never run |
 | macOS backend (AppKit + WKWebView) | not started |
-| Accessibility (AT-SPI) | not started |
-| GPU rendering, text beyond ASCII | not started |
+| Accessibility (AT-SPI) | done on Linux; not on Windows or macOS |
+| GPU rendering, text beyond Latin-1 | not started |
 
 ## Requirements
 
@@ -94,6 +94,8 @@ builds without a package registry.
 * [Getting started](docs/getting-started.md) — a first application, step by step.
 * [IPC](docs/ipc.md) — services, events, error codes, the TypeScript client.
 * [Native UI](docs/native-ui.md) — layout, drawing, input, text.
+* [Accessibility](docs/accessibility.md) — describing a native window to a
+  screen reader.
 * [Plugins](docs/plugins.md) — packaging services and lifecycle hooks.
 * [Memory management](docs/memory-management.md) — who owns what.
 * [Platforms](docs/platforms.md) — what each backend supports.

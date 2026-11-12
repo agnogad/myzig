@@ -53,6 +53,10 @@ pub const WindowOptions = struct {
     /// with a `ui.canvas.Builder` to fill. Required for a native or hybrid
     /// window; without it the surface stays blank.
     native_draw: ?backend.NativeDraw = null,
+    /// How this window describes itself to a screen reader: called once per
+    /// frame beside `native_draw`, with a `ui.accessibility.Builder` to fill.
+    /// Without it the window is an opaque rectangle to accessibility clients.
+    a11y: ?backend.AccessibleDraw = null,
     /// Opaque pointer passed to `view`, typically the app's state.
     view_context: ?*anyopaque = null,
     /// Whether the window shows both: a native surface behind, a web view in
@@ -134,6 +138,9 @@ pub const WindowState = struct {
     /// How this window's native surface is painted, kept so the backend can
     /// call it after the app has moved in memory.
     native_draw: ?backend.NativeDraw = null,
+    /// How this window describes itself to a screen reader, kept so the backend
+    /// can call it after the app has moved in memory.
+    a11y: ?backend.AccessibleDraw = null,
     /// The menu bar, when the window has one. The description is a value, so
     /// the application may pass a temporary.
     menu: ?@import("menu.zig").Menu = null,

@@ -311,6 +311,7 @@ pub fn create(app: *app_mod.App, id: u32, opts: backend.WindowOptions) CreateErr
             native_surface.?.draw = draw.func;
             native_surface.?.ctx = draw.ctx;
         }
+        native_surface.?.describe = opts.a11y;
     }
 
     try registry.put(gpa, id, .{

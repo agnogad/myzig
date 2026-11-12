@@ -15,7 +15,7 @@ here only once it compiles, has tests, and has been run.
 | 1 | Linux backend: GTK 3 windows, WebKitGTK pages, `myzig://` scheme, bridge injection | **Done** |
 | 2 | Typed IPC: service binding, events, TypeScript client generation | **Done** |
 | 3 | Desktop APIs: clipboard, dialogs, notifications, tray, menus, shortcuts | **Done** |
-| 4 | Native UI toolkit: layout, rendering, accessibility | **In progress** (layout, rasteriser, input done; accessibility pending) |
+| 4 | Native UI toolkit: layout, rendering, accessibility | **In progress** (layout, rasteriser, input and AT-SPI done; Unicode text is Latin-1 only) |
 | 5 | Command line: `new`, `generate`, `doctor` | **Done** |
 | 6 | Windows backend: Win32 + WebView2 | **Written, compiles for Windows, not yet run** |
 | 7 | macOS backend: AppKit + WKWebView | Not started |

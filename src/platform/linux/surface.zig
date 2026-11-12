@@ -25,6 +25,7 @@ const backend = @import("../backend.zig");
 const events = @import("../../events.zig");
 const ui = @import("../../ui/ui.zig");
 const log = @import("../../log.zig");
+const atspi = @import("atspi.zig");
 
 /// The pixel buffer and geometry for one native surface.
 pub const Surface = struct {
@@ -40,6 +41,11 @@ pub const Surface = struct {
     /// Reused across frames so drawing the same UI does not allocate.
     builder: ui.canvas.Builder = undefined,
     builder_ready: bool = false,
+    /// The accessibility tree, filled once per frame beside the drawing list.
+    a11y_tree: ui.a11y.Builder = undefined,
+    a11y_ready: bool = false,
+    /// The caller's description of the window for a screen reader.
+    describe: ?backend.AccessibleDraw = null,
     /// The drawing area, the widget that actually repaints.
     widget: ?ffi.GtkWidget = null,
     /// The event box around it, which receives pointer input.
@@ -65,6 +71,8 @@ pub fn deinit() void {
 }
 
 fn destroySurface(s: *Surface) void {
+    atspi.unpublish(s.window_id);
+    if (s.a11y_ready) s.a11y_tree.deinit();
     if (s.builder_ready) s.builder.deinit();
     if (s.pixels.len > 0) gpa.free(s.pixels);
     gpa.destroy(s);
@@ -156,6 +164,18 @@ pub fn renderFrame(s: *Surface) []const u8 {
     // Start from a clean buffer. The buffer is swapped to BGRA before the blit,
     // so a frame must never draw on top of the previous one: the colours would
     // be in the wrong order and stale pixels would show through.
+    // The accessibility tree describes the same frame the drawing list does,
+    // so a reader and the screen never disagree about what is visible.
+    if (s.describe) |d| {
+        if (!s.a11y_ready) {
+            s.a11y_tree = ui.a11y.Builder.init(gpa);
+            s.a11y_ready = true;
+        }
+        s.a11y_tree.begin(.{ .x = 0, .y = 0, .width = dip_w, .height = dip_h }) catch {};
+        d.func(d.ctx, @ptrCast(&s.a11y_tree), .{ .x = 0, .y = 0, .width = dip_w, .height = dip_h });
+        atspi.publish(s.window_id, s.a11y_tree.snapshot());
+    }
+
     @memset(s.pixels, 0);
     const surface = ui.canvas.Surface.init(s.pixels, s.width, s.height);
     ui.canvas.render(surface, s.builder.commands.items, 1);

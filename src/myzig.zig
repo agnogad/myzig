@@ -82,6 +82,15 @@ pub const log = @import("log.zig");
 pub const loop = @import("loop.zig");
 pub const paths = @import("utils/paths.zig");
 pub const env = @import("utils/env.zig");
+
+/// The Linux accessibility bridge, for tests and for backends that publish a
+/// tree. Empty on other platforms.
+pub const platform_linux = if (@import("builtin").os.tag == .linux)
+    struct {
+        pub const atspi = @import("platform/linux/atspi.zig");
+    }
+else
+    struct {};
 pub const version = @import("version.zig").version_string;
 
 // ------------------------------------------------------------ convenience
@@ -110,6 +119,9 @@ test {
     // The platform FFI layer is only compiled for the platform it belongs to;
     // importing it unconditionally would pull GTK into a Windows build.
     if (@import("builtin").os.tag == .linux) {
+        // Re-exported so a test program can drive the bridge directly.
         _ = @import("platform/linux/ffi.zig");
+        _ = @import("platform/linux/dbus.zig");
+        _ = @import("platform/linux/atspi.zig");
     }
 }

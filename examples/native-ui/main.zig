@@ -23,6 +23,27 @@ var frames: [3]ui.Rect = .{ .zero, .zero, .zero };
 /// Buttons, in draw order. The labels are constant; only the frames change.
 const labels = [_][]const u8{ "+1", "+10", "Theme" };
 
+/// Describes the window to a screen reader: the same labels and frames that
+/// `draw` puts on screen, in the order a reader walks them.
+fn describe(ctx: *anyopaque, builder: *anyopaque, size: myzig.platform.backend.DrawRect) void {
+    _ = size;
+    const state: *State = @ptrCast(@alignCast(ctx));
+    const b: *ui.a11y.Builder = @ptrCast(@alignCast(builder));
+
+    b.setName(0, "MyZig native UI") catch return;
+    b.setDescription(0, "A window drawn by MyZig, with no web engine.") catch return;
+
+    var buf: [32]u8 = undefined;
+    const line = std.fmt.bufPrint(&buf, "Clicks: {d}", .{state.clicks}) catch "Clicks";
+    _ = b.leaf(.label, .{ .x = 16, .y = 72, .width = 240, .height = 16 }, line) catch return;
+
+    for (labels, 0..) |label, i| {
+        const id = b.beginNode(.button, frames[i]) catch return;
+        b.setName(id, label) catch return;
+        b.endNode();
+    }
+}
+
 fn draw(ctx: *anyopaque, builder: *anyopaque, size: myzig.platform.backend.DrawRect, scale: f32) void {
     _ = scale;
     const state: *State = @ptrCast(@alignCast(ctx));
@@ -142,6 +163,9 @@ pub fn main() !void {
             }
         }.v,
         .native_draw = .{ .func = draw, .ctx = state },
+        // The same interface, described for a screen reader. Without this the
+        // window is a rectangle of pixels to an accessibility client.
+        .a11y = .{ .func = describe, .ctx = state },
     });
 
     std.debug.print("native-ui: window open, no web engine loaded\n", .{});
