@@ -4,3 +4,4 @@ zig-out/
 *.a
 *.so
 tmp_shots/
+dist/
