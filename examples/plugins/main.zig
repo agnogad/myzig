@@ -80,6 +80,13 @@ const plugin: myzig.plugins.Plugin = .{
     .shutdown = shutdown,
 };
 
+/// A page event the application listens for. Printing it is enough to prove the
+/// round trip; a real application would act on it.
+fn onPageEvent(_: *Ticker, window: u32, payload: myzig.json.Value) void {
+    const id = payload.get("id") orelse return;
+    std.debug.print("page event from window {d}: id={s}\n", .{ window, id.number });
+}
+
 const frontend = [_]myzig.FrontendFile{
     .{
         .path = "index.html",
@@ -108,6 +115,9 @@ pub fn main() !void {
     // The plugin needs the app to emit events from its thread.
     ticker.app = &app;
     try app.addPlugin(plugin);
+
+    // Events the page sends with `window.myzig.emit` arrive here.
+    try app.onPageEvent(Ticker, "ui:clicked", &ticker, onPageEvent);
 
     _ = try app.createWindow(.{
         .title = "Plugins",

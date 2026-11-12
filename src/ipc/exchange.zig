@@ -65,6 +65,61 @@ pub const Exchange = struct {
     /// many ids cannot grow this without bound.
     cancelled: std.AutoHashMapUnmanaged(CancelKey, void) = .empty,
 
+    /// Listeners for events the page sends with `window.myzig.emit`, in
+    /// registration order.
+    page_listeners: std.ArrayListUnmanaged(PageListener) = .empty,
+
+    pub const PageListener = struct {
+        name: []const u8,
+        callback: *const fn (ctx: ?*anyopaque, window: u32, payload: json.Value) void,
+        ctx: ?*anyopaque,
+    };
+
+    /// Listens for an event the page sends with `window.myzig.emit`. The name
+    /// borrows the caller's slice, so it must outlive the exchange.
+    ///
+    /// Returns a registration id that `removePageListener` accepts.
+    pub fn addPageListener(
+        self: *Exchange,
+        name: []const u8,
+        callback: *const fn (ctx: ?*anyopaque, window: u32, payload: json.Value) void,
+        ctx: ?*anyopaque,
+    ) !usize {
+        try self.page_listeners.append(self.allocator, .{
+            .name = name,
+            .callback = callback,
+            .ctx = ctx,
+        });
+        return self.page_listeners.items.len - 1;
+    }
+
+    /// Removes the listener registered at `index`, if it is still there. The
+    /// slot is emptied rather than shifted so other indices stay valid.
+    pub fn removePageListener(self: *Exchange, index: usize) void {
+        if (index >= self.page_listeners.items.len) return;
+        _ = self.page_listeners.orderedRemove(index);
+    }
+
+    /// Counts how many listeners an event name has, for tests and diagnostics.
+    pub fn pageListenerCount(self: *const Exchange, name: []const u8) usize {
+        var n: usize = 0;
+        for (self.page_listeners.items) |l| {
+            if (std.mem.eql(u8, l.name, name)) n += 1;
+        }
+        return n;
+    }
+
+    /// Runs every listener registered for the event's name.
+    ///
+    /// The payload borrows the message text, which is why the callback runs
+    /// before `deliver` returns and may not keep a reference to it.
+    fn deliverPageEvent(self: *Exchange, window: u32, ev: protocol.Incoming.PageEvent) void {
+        for (self.page_listeners.items) |l| {
+            if (!std.mem.eql(u8, l.name, ev.name)) continue;
+            l.callback(l.ctx, window, ev.data);
+        }
+    }
+
     const SubSet = std.ArrayListUnmanaged([]const u8);
     const CancelKey = struct { window: u32, id: u32 };
 
@@ -76,6 +131,7 @@ pub const Exchange = struct {
     }
 
     pub fn deinit(self: *Exchange) void {
+        self.page_listeners.deinit(self.allocator);
         var it = self.subscriptions.iterator();
         while (it.next()) |e| {
             for (e.value_ptr.items) |name| self.allocator.free(name);
@@ -187,6 +243,12 @@ pub const Exchange = struct {
             },
             .cancel => |id| {
                 self.recordCancel(window, id);
+                return false;
+            },
+            .page_event => |ev| {
+                // Forwarded to the application's listeners. Nothing is answered:
+                // the page's `emit` returns void, so a reply would be noise.
+                self.deliverPageEvent(window, ev);
                 return false;
             },
             .call => |call| {
@@ -681,4 +743,70 @@ test "two replies in one batch are separated by exactly one comma" {
     try testing.expectEqual(@as(usize, 2), parsed.value.array.len);
     try testing.expectEqualStrings("10", parsed.value.array[0].get("v").?.number);
     try testing.expectEqualStrings("9", parsed.value.array[1].get("v").?.number);
+}
+
+test "an event from the page reaches the application" {
+    // `window.myzig.emit` used to exist only in the generated TypeScript, so a
+    // page could call it and nothing happened on the Zig side.
+    var ex = Exchange.init(testing.allocator);
+    defer ex.deinit();
+    var rec = Recorder{};
+    defer rec.deinit(testing.allocator);
+    newExchange(&ex, &rec);
+
+    const Grab = struct {
+        var got_name: [32]u8 = undefined;
+        var got_len: usize = 0;
+        var got_window: u32 = 0;
+        var got_value: usize = 0;
+        var seen: usize = 0;
+
+        fn onEvent(_: ?*anyopaque, window: u32, payload: json.Value) void {
+            got_window = window;
+            got_value = payload.get("id").?.number.len;
+            got_len = @min(payload.get("what").?.string.len, got_name.len);
+            @memcpy(got_name[0..got_len], payload.get("what").?.string[0..got_len]);
+            seen += 1;
+        }
+    };
+    Grab.seen = 0;
+
+    _ = try ex.addPageListener("ui:clicked", Grab.onEvent, null);
+    try testing.expectEqual(@as(usize, 1), ex.pageListenerCount("ui:clicked"));
+
+    ex.deliver(7, "{\"t\":\"cev\",\"e\":\"ui:clicked\",\"d\":{\"id\":42,\"what\":\"save\"}}");
+
+    try testing.expectEqual(@as(usize, 1), Grab.seen);
+    try testing.expectEqual(@as(u32, 7), Grab.got_window);
+    try testing.expectEqualStrings("save", Grab.got_name[0..Grab.got_len]);
+    try testing.expectEqual(@as(usize, 2), Grab.got_value);
+    // A page event is not answered.
+    try testing.expectEqual(@as(usize, 0), rec.calls);
+}
+
+test "listeners for other names are not called" {
+    var ex = Exchange.init(testing.allocator);
+    defer ex.deinit();
+    var rec = Recorder{};
+    defer rec.deinit(testing.allocator);
+    newExchange(&ex, &rec);
+
+    const Ignore = struct {
+        var seen: usize = 0;
+        fn onEvent(_: ?*anyopaque, _: u32, _: json.Value) void {
+            seen += 1;
+        }
+    };
+
+    const index = try ex.addPageListener("wanted", Ignore.onEvent, null);
+    ex.deliver(1, "{\"t\":\"cev\",\"e\":\"other\",\"d\":null}");
+    try testing.expectEqual(@as(usize, 0), Ignore.seen);
+
+    ex.deliver(1, "{\"t\":\"cev\",\"e\":\"wanted\",\"d\":null}");
+    try testing.expectEqual(@as(usize, 1), Ignore.seen);
+
+    ex.removePageListener(index);
+    try testing.expectEqual(@as(usize, 0), ex.pageListenerCount("wanted"));
+    ex.deliver(1, "{\"t\":\"cev\",\"e\":\"wanted\",\"d\":null}");
+    try testing.expectEqual(@as(usize, 1), Ignore.seen);
 }

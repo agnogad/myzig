@@ -106,6 +106,13 @@
       enqueue({ t: "cancel", id: id });
     },
 
+    // Sends an event to the Zig side and, at the same time, to this page's own
+    // listeners, so a page can use the same name for both directions.
+    emit: function (name, payload) {
+      enqueue({ t: "cev", e: name, d: payload === undefined ? null : payload });
+      emit(name, payload);
+    },
+
     window: {
       minimize: function () { return api.call("Window.minimize"); },
       maximize: function () { return api.call("Window.maximize"); },

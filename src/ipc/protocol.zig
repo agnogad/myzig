@@ -45,6 +45,14 @@ pub const Incoming = union(enum) {
     subscribe: []const u8,
     unsubscribe: []const u8,
     cancel: u32,
+    /// An event the page sent with `window.myzig.emit`. The payload borrows the
+    /// message text, so it is valid only until the exchange returns.
+    page_event: PageEvent,
+
+    pub const PageEvent = struct {
+        name: []const u8,
+        data: json.Value,
+    };
 
     pub const Call = struct {
         /// Page-assigned request id, echoed in the reply.
@@ -82,6 +90,12 @@ pub const Incoming = union(enum) {
         }
         if (std.mem.eql(u8, kind, "unsub")) {
             return .{ .unsubscribe = fieldString(obj, "e") orelse return null };
+        }
+        if (std.mem.eql(u8, kind, "cev")) {
+            return .{ .page_event = .{
+                .name = fieldString(obj, "e") orelse return null,
+                .data = field(obj, "d") orelse .null,
+            } };
         }
         if (std.mem.eql(u8, kind, "cancel")) {
             const id_val = field(obj, "id") orelse return null;

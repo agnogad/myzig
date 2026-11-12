@@ -18,6 +18,16 @@ pub const Color = geometry.Color;
 pub const layout = @import("layout.zig");
 pub const canvas = @import("canvas.zig");
 
+/// The drawing list a native surface receives.
+pub const Builder = canvas.Builder;
+pub const Command = canvas.Command;
+pub const Surface = canvas.Surface;
+pub const textWidth = canvas.textWidth;
+pub const textHeight = canvas.textHeight;
+
+/// The bitmap font, for callers that need a glyph's advance themselves.
+pub const font8x8 = @import("font8x8.zig");
+
 test {
     @import("std").testing.refAllDecls(@This());
 }

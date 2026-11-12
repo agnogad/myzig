@@ -377,6 +377,36 @@ pub const App = struct {
         try self.plugins.add(plugin);
     }
 
+    /// Listens for an event the page sends with `window.myzig.emit`.
+    ///
+    /// The listener receives the window that sent it and the payload. The
+    /// payload borrows the inbound message, so it is valid only during the
+    /// call: copy what is needed.
+    ///
+    /// The name is borrowed, so it must outlive the app — a string literal is
+    /// the normal choice.
+    pub fn onPageEvent(
+        self: *App,
+        comptime T: type,
+        event_name: []const u8,
+        ctx: *T,
+        handler: *const fn (state: *T, window: u32, payload: json.Value) void,
+    ) !void {
+        const Thunk = struct {
+            state: *T,
+            handler: *const fn (state: *T, window: u32, payload: json.Value) void,
+
+            fn call(c: ?*anyopaque, window: u32, payload: json.Value) void {
+                const self_: *@This() = @ptrCast(@alignCast(c.?));
+                self_.handler(self_.state, window, payload);
+            }
+        };
+
+        const thunk = try self.arena.allocator().create(Thunk);
+        thunk.* = .{ .state = ctx, .handler = handler };
+        _ = try self.ipc.addPageListener(event_name, Thunk.call, @ptrCast(thunk));
+    }
+
     /// How many plugins the application added.
     pub fn pluginCount(self: *const App) usize {
         return self.plugins.count();
