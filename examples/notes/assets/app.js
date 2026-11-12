@@ -4,12 +4,15 @@
 // promise; `myzig.on` subscribes to events the Zig side emits.
 
 const list = document.getElementById('list');
+/// The note being edited, or null when the form makes a new one.
+let editing = null;
 const count = document.getElementById('count');
 const empty = document.getElementById('empty');
 const saved = document.getElementById('saved');
 const form = document.getElementById('composer');
 const titleInput = document.getElementById('title');
 const bodyInput = document.getElementById('body');
+const submitButton = form.querySelector('button[type="submit"]');
 
 /// Zig stores a note as `[title, body, id]`, because that is also the file
 /// format. The page names the fields once, here, so the rest of the code reads
@@ -36,6 +39,18 @@ function render(notes) {
     body.textContent = note.body;
     text.append(title, body);
 
+    const edit = document.createElement('button');
+    edit.textContent = 'Edit';
+    edit.setAttribute('aria-label', `Edit ${note.title}`);
+    edit.addEventListener('click', () => {
+      editing = note;
+      titleInput.value = note.title;
+      bodyInput.value = note.body;
+      titleInput.focus();
+      submitButton.textContent = 'Save changes';
+      cancelButton.hidden = false;
+    });
+
     const remove = document.createElement('button');
     remove.textContent = 'Delete';
     remove.setAttribute('aria-label', `Delete ${note.title}`);
@@ -43,7 +58,7 @@ function render(notes) {
       await myzig.call('Notes.delete', String(note.id));
     });
 
-    li.append(text, remove);
+    li.append(text, edit, remove);
     list.append(li);
   }
 }
@@ -59,10 +74,13 @@ async function refresh() {
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
   saved.textContent = 'Saving…';
-  console.log('composer submitted:', JSON.stringify(titleInput.value));
   try {
-    const id = await myzig.call('Notes.add', titleInput.value, bodyInput.value);
-    console.log('added note id', id);
+    if (editing) {
+      await myzig.call('Notes.update', String(editing.id), titleInput.value, bodyInput.value);
+      editing = null;
+    } else {
+      await myzig.call('Notes.add', titleInput.value, bodyInput.value);
+    }
   } catch (e) {
     // A failure here was invisible before: the form cleared itself and the
     // user saw nothing happen.
@@ -70,16 +88,21 @@ form.addEventListener('submit', async (event) => {
     saved.textContent = 'Could not add the note';
     return;
   }
-  titleInput.value = '';
-  bodyInput.value = '';
-  titleInput.focus();
+  resetForm();
 });
 
-document.getElementById('clear').addEventListener('click', () => {
+/// Back to making a new note, whichever mode the form was in.
+function resetForm() {
+  editing = null;
   titleInput.value = '';
   bodyInput.value = '';
+  submitButton.textContent = 'Add note';
+  cancelButton.hidden = true;
   titleInput.focus();
-});
+}
+
+const cancelButton = document.getElementById('cancel');
+cancelButton.addEventListener('click', resetForm);
 
 // A scripted self-test: add one note through the same call the form makes.
 // The page asks for it rather than waiting for an event, because an event sent
@@ -103,6 +126,19 @@ if (params.get('selftest') === 'menu') {
   console.log('ready for a menu command');
 }
 
+if (params.get('selftest') === 'update') {
+  // Add, then edit, then read back: the three calls a user makes through the
+  // buttons, in the same order.
+  (async () => {
+    const raw = await myzig.call('Notes.list');
+    const notes = fromWire(raw);
+    const target = notes[0];
+    console.log('updating note', target.id);
+    await myzig.call('Notes.update', String(target.id), 'Renamed', 'The body was replaced.');
+    console.log('update self test done');
+  })().catch((e) => console.error('update selftest failed', e));
+}
+
 if (params.get('selftest') === '1') {
   myzig.call('Notes.add', 'Self test', 'Added without a pointer.')
     .then((id) => console.log('selftest added note', id))
@@ -118,11 +154,7 @@ myzig.on('notes:changed', () => {
 });
 
 // The Zig side resets the form after a note was made from the menu.
-myzig.on('notes:form', () => {
-  titleInput.value = '';
-  bodyInput.value = '';
-  titleInput.focus();
-});
+myzig.on('notes:form', resetForm);
 
 refresh().catch((e) => {
   saved.textContent = 'Could not read the notes';

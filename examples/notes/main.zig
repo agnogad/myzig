@@ -200,6 +200,40 @@ fn addNote(ctx: ?*anyopaque, args: myzig.ipc.Args) myzig.ipc.Result {
     return myzig.ipc.Result.success(.{ .number = text });
 }
 
+/// Replaces a note's text. Without this a note could be written once and never
+/// corrected, which is not a note application.
+fn updateNote(ctx: ?*anyopaque, args: myzig.ipc.Args) myzig.ipc.Result {
+    const state: *State = @ptrCast(@alignCast(ctx.?));
+    var a = args;
+    const raw = a.stringBounded(20) catch |e| return myzig.ipc.Args.toResult(e);
+    const title = a.stringBounded(200) catch |e| return myzig.ipc.Args.toResult(e);
+    const body = a.stringBounded(8000) catch |e| return myzig.ipc.Args.toResult(e);
+
+    const id = std.fmt.parseInt(u64, raw, 10) catch
+        return myzig.ipc.Result.fail(.invalid_argument, "note id is not a number");
+    const index = state.find(id) orelse
+        return myzig.ipc.Result.fail(.invalid_argument, "no note with that id");
+
+    // The new text is allocated before the old is freed, so a failure to
+    // allocate leaves the note as it was rather than empty.
+    const new_title = state.gpa.dupe(u8, if (title.len == 0) "Untitled" else title) catch
+        return myzig.ipc.Result.fail(.internal, "out of memory");
+    const new_body = state.gpa.dupe(u8, body) catch {
+        state.gpa.free(new_title);
+        return myzig.ipc.Result.fail(.internal, "out of memory");
+    };
+
+    state.gpa.free(state.notes.items[index].title);
+    state.gpa.free(state.notes.items[index].body);
+    state.notes.items[index].title = new_title;
+    state.notes.items[index].body = new_body;
+    state.dirty = true;
+    save(state, state.io);
+
+    _ = state.app.emit("notes:changed", .{ .string = state.toJson() });
+    return myzig.ipc.Result.success(.null);
+}
+
 fn deleteNote(ctx: ?*anyopaque, args: myzig.ipc.Args) myzig.ipc.Result {
     const state: *State = @ptrCast(@alignCast(ctx.?));
     var a = args;
@@ -441,6 +475,7 @@ fn selftestUrl() []const u8 {
     const v = myzig.env.get("MYZIG_NOTES_SELFTEST") orelse return "myzig://app/index.html";
     if (std.mem.eql(u8, v, "delete")) return "myzig://app/index.html?selftest=delete";
     if (std.mem.eql(u8, v, "menu")) return "myzig://app/index.html?selftest=menu";
+    if (std.mem.eql(u8, v, "update")) return "myzig://app/index.html?selftest=update";
     if (std.mem.eql(u8, v, "1")) return "myzig://app/index.html?selftest=1";
     return "myzig://app/index.html";
 }
@@ -469,6 +504,7 @@ pub fn main(init: std.process.Init) !void {
 
     try app.bind(.{ .name = "Notes.list", .invoke = listNotes, .ctx = &state, .arity = 0 });
     try app.bind(.{ .name = "Notes.add", .invoke = addNote, .ctx = &state, .arity = 2 });
+    try app.bind(.{ .name = "Notes.update", .invoke = updateNote, .ctx = &state, .arity = 3 });
     try app.bind(.{ .name = "Notes.delete", .invoke = deleteNote, .ctx = &state, .arity = 1 });
 
     const window = try app.createWindow(.{
