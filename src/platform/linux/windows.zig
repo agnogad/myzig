@@ -142,7 +142,6 @@ fn ensureCallbacks() void {
             return ffi.TRUE;
         }
     }.cb);
-
 }
 
 inline fn dataInt(data: ?*anyopaque) u32 {

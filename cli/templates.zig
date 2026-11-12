@@ -145,15 +145,38 @@ pub const main_native =
     \\const myzig = @import("myzig");
     \\const ui = myzig.ui;
     \\
-    \\fn draw(_: *anyopaque, builder: *anyopaque, size: myzig.platform.backend.DrawRect, scale: f32) void {
-    \\    _ = scale;
-    \\    const b: *ui.canvas.Builder = @ptrCast(@alignCast(builder));
-    \\    const width = size.width;
-    \\    const height = size.height;
+    \\/// What the window shows. It lives in `main`, so it outlives the window, and
+    \\/// it is handed to the draw callback as its context.
+    \\const State = struct {
+    \\    title: []const u8,
+    \\    clicks: u32 = 0,
+    \\};
     \\
-    \\    b.fillRect(.{ .x = 0, .y = 0, .width = width, .height = height }, ui.Color.rgb(0xf7f8fa)) catch return;
-    \\    b.fillRect(.{ .x = 0, .y = 0, .width = width, .height = 48 }, ui.Color.rgb(0x2f6fed)) catch return;
-    \\    b.text(.{ .x = 16, .y = 20, .width = 320, .height = 8 }, "@@name@@", ui.Color.white, 1) catch return;
+    \\fn draw(ctx: *anyopaque, builder: *anyopaque, size: myzig.platform.DrawRect, scale: f32) void {
+    \\    _ = scale;
+    \\    const b: *ui.Builder = @ptrCast(@alignCast(builder));
+    \\    const state: *State = @ptrCast(@alignCast(ctx));
+    \\
+    \\    b.fillRect(.{ .x = 0, .y = 0, .width = size.width, .height = size.height }, ui.Color.rgb(0xf7f8fa)) catch return;
+    \\    b.fillRect(.{ .x = 0, .y = 0, .width = size.width, .height = 48 }, ui.Color.rgb(0x2f6fed)) catch return;
+    \\    b.text(.{ .x = 16, .y = 16, .width = 400, .height = 16 }, state.title, ui.Color.white, 2) catch return;
+    \\
+    \\    // Text is copied by the builder, so a stack buffer is correct here: the
+    \\    // frame is rasterised after this callback returns.
+    \\    var buf: [64]u8 = undefined;
+    \\    const line = std.fmt.bufPrint(&buf, "Clicks: {d}", .{state.clicks}) catch return;
+    \\    b.text(.{ .x = 16, .y = 80, .width = 400, .height = 24 }, line, ui.Color.rgb(0x1a1d21), 3) catch return;
+    \\
+    \\    b.fillRect(.{ .x = 16, .y = 130, .width = 160, .height = 44 }, ui.Color.rgb(0x2f6fed)) catch return;
+    \\    b.text(.{ .x = 40, .y = 143, .width = 160, .height = 16 }, "+1 click", ui.Color.white, 2) catch return;
+    \\}
+    \\
+    \\/// Handles a pointer press. Returning true asks for a new frame, which is what
+    \\/// makes the counter appear.
+    \\fn onPress(state: *State, x: f32, y: f32) bool {
+    \\    if (x < 16 or x > 176 or y < 130 or y > 174) return false;
+    \\    state.clicks += 1;
+    \\    return true;
     \\}
     \\
     \\pub fn main() !void {
@@ -166,14 +189,14 @@ pub const main_native =
     \\    });
     \\    defer app.deinit();
     \\
+    \\    var state = State{ .title = "@@name@@" };
+    \\    app.setSurfaceInput(State, &state, onPress);
+    \\
     \\    _ = try app.createWindow(.{
     \\        .title = "@@name@@",
     \\        .width = 800,
     \\        .height = 600,
-    \\        .view = struct {
-    \\            fn v(_: *anyopaque) void {}
-    \\        }.v,
-    \\        .native_draw = .{ .func = draw, .ctx = null },
+    \\        .native_draw = .{ .func = draw, .ctx = &state },
     \\    });
     \\    try app.run();
     \\}

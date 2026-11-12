@@ -55,7 +55,7 @@ pub fn parseLevel(raw: []const u8) ?Level {
 }
 
 pub fn enabled(l: Level) bool {
-    return @intFromEnum(l) <= @intFromEnum(level);
+    return @backingInt(l) <= @backingInt(level);
 }
 
 /// Formats into a stack buffer and writes once to stderr. Never allocates.

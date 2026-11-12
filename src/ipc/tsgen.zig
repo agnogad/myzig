@@ -34,7 +34,7 @@ pub const Api = struct {
 /// Writes the declaration file. The output is deterministic: methods appear in
 /// registration order, so regenerating an unchanged app produces a byte-for-byte
 /// identical file and cannot cause spurious diffs.
-pub const Error = error{OutOfMemory, LineTooLong};
+pub const Error = error{ OutOfMemory, LineTooLong };
 
 pub fn generate(allocator: std.mem.Allocator, api: Api) Error![]u8 {
     var out: std.ArrayList(u8) = .empty;

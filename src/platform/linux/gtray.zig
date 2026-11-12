@@ -103,7 +103,6 @@ pub const Shortcut = struct {
 
 /// X11 is loaded at runtime, like GTK and WebKit: MyZig links no libraries, so
 /// an application that never binds a global shortcut does not map libX11.
-
 const X11 = struct {
     lib: std.DynLib,
 
@@ -177,7 +176,6 @@ fn onXError(_: ?*anyopaque, event: ?*anyopaque) callconv(.c) c_int {
     }
     return 0;
 }
-
 
 /// Grabbed shortcuts, so they can be released again.
 var shortcuts: std.ArrayListUnmanaged(Shortcut) = .empty;
@@ -297,9 +295,9 @@ fn keyvalOf(key: menu_mod.Accelerator.Key) c_ulong {
         .equals => '=',
         .grave => '`',
         else => |k| blk: {
-            const n = @intFromEnum(k);
-            const a = @intFromEnum(K.a);
-            const d = @intFromEnum(K.digit_0);
+            const n = @backingInt(k);
+            const a = @backingInt(K.a);
+            const d = @backingInt(K.digit_0);
             if (n >= a and n < a + 26) break :blk @as(c_ulong, 'a') + (n - a);
             if (n >= d and n < d + 10) break :blk @as(c_ulong, '0') + (n - d);
             break :blk 0;

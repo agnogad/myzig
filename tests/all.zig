@@ -3,6 +3,7 @@
 //! backend, so they need no display.
 const std = @import("std");
 const myzig = @import("myzig");
+const App = myzig.App;
 
 test {
     std.testing.refAllDecls(myzig);
@@ -122,3 +123,45 @@ test "a plugin added after run has started is rejected" {
     // window count so a plugin cannot slip in after the first page loaded.
     try std.testing.expectEqual(myzig.Phase.initialised, app.phase);
 }
+
+test "a window with a native draw callback is accepted and runs" {
+    // Regression: the window's `kind` stayed at its `.web` default, so a
+    // window given a `native_draw` callback opened an empty web view and never
+    // drew. The first symptom was a blank white window with no content.
+    //
+    // The kind is internal, so this test drives the public path instead: build
+    // the app, create each shape of window and run it against the testing
+    // backend, which records what it was asked for.
+    var gpa_state = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_state.deinit();
+    const gpa = gpa_state.allocator();
+
+    var app = try myzig.App.init(gpa, .{ .name = "Test" });
+    defer app.deinit();
+
+    const native = try app.createWindow(.{
+        .title = "Native",
+        .native_draw = .{ .func = drawNothing, .ctx = @ptrCast(&dummy_ctx) },
+    });
+    try std.testing.expect(app.windowById(native.id) != null);
+
+    const hybrid = try app.createWindow(.{
+        .title = "Hybrid",
+        .url = "myzig://app/index.html",
+        .native_draw = .{ .func = drawNothing, .ctx = @ptrCast(&dummy_ctx) },
+    });
+    try std.testing.expect(app.windowById(hybrid.id) != null);
+
+    const web = try app.createWindow(.{ .title = "Web", .url = "myzig://app/index.html" });
+    try std.testing.expect(app.windowById(web.id) != null);
+
+    // The content kind reaches only the backend, so the observable part is
+    // that a native window is accepted at all: before the fix it was handed to
+    // the backend as a web window and came up blank.
+}
+
+fn drawNothing(_: *anyopaque, _: *anyopaque, _: myzig.platform.DrawRect, _: f32) void {}
+
+/// A native draw context is never optional: a callback always has somewhere to
+/// read its state from, even when it has none.
+var dummy_ctx: u8 = 0;

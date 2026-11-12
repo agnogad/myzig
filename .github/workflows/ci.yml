@@ -1,0 +1,82 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: build and test (linux)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.1
+
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libcairo2-dev \
+            libx11-dev \
+            xvfb \
+            xdotool \
+            imagemagick \
+            x11-utils \
+            dbus-x11 \
+            fonts-dejavu-core
+
+      - name: Check formatting
+        run: zig fmt --check .
+
+      - name: Build
+        run: zig build install --summary all
+
+      - name: Unit and integration tests
+        # The suite runs against an in-memory backend, so it needs no display.
+        run: zig build test --summary all
+
+      - name: Format the generated TypeScript
+        # `myzig generate` writes a declaration file that must be valid
+        # TypeScript, not merely text that looks like it.
+        run: |
+          npm install --no-save typescript@5
+          ./zig-out/bin/myzig generate --out /tmp/myzig-client.d.ts
+          npx tsc --strict --noEmit /tmp/myzig-client.d.ts
+
+      - name: Smoke test every example under Xvfb
+        # A GUI example that crashes on startup or reports a page script error
+        # fails here rather than in a release.
+        run: |
+          Xvfb :99 -screen 0 1280x800x24 &
+          sleep 2
+          DISPLAY=:99 SMOKE_TIMEOUT=10 ./scripts/smoke.sh
+
+      - name: Generate a project and build it
+        # `myzig new` writes a manifest that must build against this checkout.
+        run: |
+          export MYZIG_HOME="$PWD"
+          export PATH="$PWD/zig-out/bin:$PATH"
+          mkdir -p /tmp/gen && cd /tmp/gen
+          myzig new myapp
+          cd myapp
+          zig build --summary all
+          cd /tmp/gen
+          myzig new nat --native
+          cd nat
+          zig build --summary all
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-logs
+          path: /tmp/tmp.*/*.log
+          if-no-files-found: ignore

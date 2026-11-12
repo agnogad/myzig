@@ -194,7 +194,7 @@ pub const Key = enum(u16) {
     /// Returns the letter key for an ASCII lowercase letter, if any.
     pub fn fromLetter(ch: u8) ?Key {
         if (ch < 'a' or ch > 'z') return null;
-        return @enumFromInt(@intFromEnum(Key.a) + (ch - 'a'));
+        return @fromBackingInt(@intCast(@backingInt(Key.a) + (ch - 'a')));
     }
 
     /// Whether this key is a modifier on its own.

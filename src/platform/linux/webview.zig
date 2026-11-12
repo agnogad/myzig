@@ -122,7 +122,6 @@ fn ensureCallbacks() void {
             return if (onDecidePolicy(dataInt(data), action, decision_type)) ffi.TRUE else ffi.FALSE;
         }
     }.cb);
-
 }
 
 // ------------------------------------------------------------------- create

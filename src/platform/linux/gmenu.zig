@@ -247,9 +247,9 @@ fn keyvalOf(key: menu_mod.Accelerator.Key) c_uint {
         .f11 => 0xffc8,
         .f12 => 0xffc9,
         else => |k| blk: {
-            const n = @intFromEnum(k);
-            const a = @intFromEnum(K.a);
-            const d = @intFromEnum(K.digit_0);
+            const n = @backingInt(k);
+            const a = @backingInt(K.a);
+            const d = @backingInt(K.digit_0);
             if (n >= a and n < a + 26) break :blk @as(c_uint, 'a') + (n - a);
             if (n >= d and n < d + 10) break :blk @as(c_uint, '0') + (n - d);
             break :blk 0;

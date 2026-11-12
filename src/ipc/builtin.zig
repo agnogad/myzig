@@ -433,8 +433,8 @@ test "every built-in method has a service-qualified name" {
     // page.
     const names = [_][]const u8{
         "Clipboard.readText", "Clipboard.writeText", "Dialog.open",
-        "Dialog.save",        "Dialog.message",       "Notification.show",
-        "Shell.openExternal", "App.version",          "App.info",
+        "Dialog.save",        "Dialog.message",      "Notification.show",
+        "Shell.openExternal", "App.version",         "App.info",
     };
     for (names) |n| {
         const dot = std.mem.indexOfScalar(u8, n, '.') orelse return error.TestUnexpectedResult;

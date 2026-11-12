@@ -136,7 +136,6 @@ fn mustResolve(lib: *std.DynLib, comptime T: type, comptime name: [:0]const u8) 
 // --------------------------------------------------------------- symbol table
 pub const GSFunc = ?*const fn (?gpointer) callconv(.c) gboolean;
 
-
 // GLib
 pub var g_set_prgname: *const fn (name: [*:0]const u8) callconv(.c) void = undefined;
 pub var g_idle_add_full: *const fn (priority: c_int, func: GSFunc, data: ?gpointer, notify: ?*const fn (?gpointer) callconv(.c) void) callconv(.c) guint = undefined;
@@ -899,7 +898,7 @@ test "color parsing" {
 
 test "packed rgba" {
     const c = rgbaFromPacked(0x11223344);
-    try std.testing.expectApproxEqAbs(@as(f64, @floatFromInt(@as(u32,0x11))) / 255.0, c.red, 1e-9);
+    try std.testing.expectApproxEqAbs(@as(f64, @floatFromInt(@as(u32, 0x11))) / 255.0, c.red, 1e-9);
     try std.testing.expectApproxEqAbs(@as(f64, @floatFromInt(@as(u32, 0x44))) / 255.0, c.alpha, 1e-9);
 }
 

@@ -105,14 +105,14 @@ pub fn isIdentifier(s: []const u8) bool {
 /// A Zig keyword that cannot be used as a bare identifier in generated code.
 pub fn isZigKeyword(s: []const u8) bool {
     const keywords = [_][]const u8{
-        "addrspace",  "align",     "allowzero", "and",       "anyframe",  "anytype",
-        "asm",        "async",     "await",     "break",     "callconv",  "catch",
-        "comptime",   "const",     "continue",  "defer",     "else",      "enum",
-        "errdefer",   "error",     "export",    "extern",    "fn",        "for",
-        "if",         "inline",    "linksection", "noalias", "noinline",  "nosuspend",
-        "opaque",     "or",        "orelse",    "packed",    "pub",       "resume",
-        "return",     "struct",    "suspend",   "switch",    "test",      "threadlocal",
-        "try",        "union",     "unreachable", "usingnamespace", "var",  "volatile",
+        "addrspace", "align",  "allowzero",   "and",            "anyframe", "anytype",
+        "asm",       "async",  "await",       "break",          "callconv", "catch",
+        "comptime",  "const",  "continue",    "defer",          "else",     "enum",
+        "errdefer",  "error",  "export",      "extern",         "fn",       "for",
+        "if",        "inline", "linksection", "noalias",        "noinline", "nosuspend",
+        "opaque",    "or",     "orelse",      "packed",         "pub",      "resume",
+        "return",    "struct", "suspend",     "switch",         "test",     "threadlocal",
+        "try",       "union",  "unreachable", "usingnamespace", "var",      "volatile",
         "while",
     };
     for (keywords) |k| {

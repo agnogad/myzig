@@ -272,8 +272,8 @@ fn keyOf(raw: []const u8) ?Accelerator.Key {
     if (raw.len == 1) {
         const c = std.ascii.toLower(raw[0]);
         return switch (c) {
-            'a'...'z' => @enumFromInt(@intFromEnum(Accelerator.Key.a) + (c - 'a')),
-            '0'...'9' => @enumFromInt(@intFromEnum(Accelerator.Key.digit_0) + (c - '0')),
+            'a'...'z' => @fromBackingInt(@intCast(@backingInt(Accelerator.Key.a) + (c - 'a'))),
+            '0'...'9' => @fromBackingInt(@intCast(@backingInt(Accelerator.Key.digit_0) + (c - '0'))),
             ',' => .comma,
             '.' => .period,
             '/' => .slash,
@@ -376,9 +376,9 @@ fn keyName(key: Accelerator.Key) []const u8 {
         else => |k| blk: {
             // Letters and digits are a contiguous run, so the index selects a
             // const name; the tables are comptime, so no allocation happens.
-            const n = @intFromEnum(k);
-            const a = @intFromEnum(Accelerator.Key.a);
-            const d = @intFromEnum(Accelerator.Key.digit_0);
+            const n = @backingInt(k);
+            const a = @backingInt(Accelerator.Key.a);
+            const d = @backingInt(Accelerator.Key.digit_0);
             if (n >= a and n < a + 26) break :blk letters[n - a];
             if (n >= d and n < d + 10) break :blk digits[n - d];
             break :blk "unknown";

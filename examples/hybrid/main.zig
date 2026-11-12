@@ -9,14 +9,11 @@ const std = @import("std");
 const myzig = @import("myzig");
 
 const frontend = [_]myzig.FrontendFile{
-    .{
-        .path = "index.html",
-        .mime = "text/html; charset=utf-8",
-        .data =
-        \\<!doctype html>
-        \\<html><head><meta charset="utf-8"><title>Hybrid</title>
-        \\<style>body{margin:0;font:16px/1.5 system-ui;display:grid;place-items:center;height:100vh}</style>
-        \\</head><body><p>Native chrome arrives in milestone 4.</p></body></html>
+    .{ .path = "index.html", .mime = "text/html; charset=utf-8", .data =
+    \\<!doctype html>
+    \\<html><head><meta charset="utf-8"><title>Hybrid</title>
+    \\<style>body{margin:0;font:16px/1.5 system-ui;display:grid;place-items:center;height:100vh}</style>
+    \\</head><body><p>Native chrome arrives in milestone 4.</p></body></html>
     },
 };
 

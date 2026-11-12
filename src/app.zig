@@ -826,7 +826,7 @@ pub const App = struct {
         state.state_key = try state.intern(opts.state_key);
         state.view = opts.view;
         state.view_context = opts.view_context;
-        state.kind = if (opts.view != null and opts.url.len > 0) .hybrid else if (opts.view != null) .native else .web;
+        state.kind = contentKind(opts);
         state.width = opts.width;
         state.height = opts.height;
         state.visible = !opts.hidden;
@@ -1381,8 +1381,44 @@ pub const App = struct {
     }
 };
 
-
 // ---------------------------------------------------------------- tests
 //
 // These tests drive the framework on the `testing` backend, which needs no
 // display, so lifecycle and the window registry are covered in CI.
+
+/// Works out which surfaces a window needs from its options.
+///
+/// A native draw callback makes a window native, and native with a page makes
+/// it hybrid. A `view` counts as native content too, because it draws itself.
+/// Leaving this at its `.web` default made a native window open an empty web
+/// view and never draw.
+pub fn contentKind(opts: WindowOptions) backend.ContentKind {
+    const native = opts.native_draw != null or opts.view != null;
+    const page = opts.url.len > 0;
+    if (native and page) return .hybrid;
+    if (native) return .native;
+    return .web;
+}
+
+test "a window's content kind follows its options" {
+    const native_draw = backend.NativeDraw{ .func = drawNothingAtAll, .ctx = @ptrCast(&kind_ctx) };
+    try std.testing.expectEqual(
+        backend.ContentKind.native,
+        contentKind(.{ .native_draw = native_draw }),
+    );
+    try std.testing.expectEqual(
+        backend.ContentKind.hybrid,
+        contentKind(.{ .native_draw = native_draw, .url = "myzig://app/index.html" }),
+    );
+    try std.testing.expectEqual(
+        backend.ContentKind.web,
+        contentKind(.{ .url = "myzig://app/index.html" }),
+    );
+    // A plain window with neither is still a web window: that is the default a
+    // backend expects.
+    try std.testing.expectEqual(backend.ContentKind.web, contentKind(.{}));
+}
+
+fn drawNothingAtAll(_: *anyopaque, _: *anyopaque, _: backend.DrawRect, _: f32) void {}
+
+var kind_ctx: u8 = 0;
