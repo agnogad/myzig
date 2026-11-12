@@ -68,6 +68,10 @@ pub const Exchange = struct {
     /// Listeners for events the page sends with `window.myzig.emit`, in
     /// registration order.
     page_listeners: std.ArrayListUnmanaged(PageListener) = .empty,
+    /// Listeners the application registered for events it emits itself. A menu
+    /// click is an application event with no page involved, so an application
+    /// that reacts to its own menu needs somewhere to hear it.
+    app_listeners: std.ArrayListUnmanaged(PageListener) = .empty,
 
     pub const PageListener = struct {
         name: []const u8,
@@ -91,6 +95,27 @@ pub const Exchange = struct {
             .ctx = ctx,
         });
         return self.page_listeners.items.len - 1;
+    }
+
+    /// Listens for an event emitted with `App.emit`, whatever caused it. The
+    /// name borrows the caller's slice and must outlive the exchange.
+    pub fn addAppListener(
+        self: *Exchange,
+        name: []const u8,
+        callback: *const fn (ctx: ?*anyopaque, window: u32, payload: json.Value) void,
+        ctx: ?*anyopaque,
+    ) !usize {
+        try self.app_listeners.append(self.allocator, .{
+            .name = name,
+            .callback = callback,
+            .ctx = ctx,
+        });
+        return self.app_listeners.items.len - 1;
+    }
+
+    pub fn removeAppListener(self: *Exchange, index: usize) void {
+        if (index >= self.app_listeners.items.len) return;
+        _ = self.app_listeners.orderedRemove(index);
     }
 
     /// Removes the listener registered at `index`, if it is still there. The
@@ -375,6 +400,14 @@ pub const Exchange = struct {
 
             self.send(window, out.items);
             sent += 1;
+        }
+
+        // The application hears its own events too. A window of 0 means the
+        // listener does not care which window caused it, which is what a menu
+        // click is.
+        for (self.app_listeners.items) |listener| {
+            if (!std.mem.eql(u8, listener.name, name)) continue;
+            listener.callback(listener.ctx, 0, payload);
         }
         return sent;
     }

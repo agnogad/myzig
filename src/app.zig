@@ -69,6 +69,10 @@ pub const AppOptions = struct {
     frontend: ?[]const FrontendFile = null,
     /// Quit when the last window closes (the default), or keep running.
     quit_on_last_window_closed: bool = true,
+    /// The process's I/O handle, when the application has one. A program that
+    /// reads or writes files passes `init.io` here so its own handlers can use
+    /// `app.io()` instead of threading a second handle through every call.
+    io: ?std.Io = null,
 };
 
 /// A file in the application's bundled frontend.
@@ -156,6 +160,12 @@ pub const App = struct {
     /// Storage for the built-in service definitions. The registry keeps
     /// pointers into this array, so it must live as long as the app.
     builtin_methods: [ipc_mod.builtin.count]ipc_mod.service.Method,
+
+    /// The I/O handle from `AppOptions.io`, or null when the program did not
+    /// set one. A null is reported by `io()` rather than passed on as an
+    /// undefined handle, so a missed argument is a clear failure instead of a
+    /// crash inside a file call.
+    io_handle: ?std.Io,
 
     const OwnedOptions = struct {
         name: []const u8,
@@ -249,6 +259,7 @@ pub const App = struct {
             .paths = paths,
             .be = .{ .ctx = undefined, .vtable = &backend_vtable },
             .be_storage = newBackend(),
+            .io_handle = opts.io,
             .ipc = ipc_mod.Exchange.init(allocator),
             .plugins = plugins_mod.Registry.init(allocator),
             .builtin_methods = undefined,
@@ -405,6 +416,44 @@ pub const App = struct {
         const thunk = try self.arena.allocator().create(Thunk);
         thunk.* = .{ .state = ctx, .handler = handler };
         _ = try self.ipc.addPageListener(event_name, Thunk.call, @ptrCast(thunk));
+    }
+
+    /// Listens for an event the application emits, whoever caused it: a menu
+    /// click, a tray click, or another handler.
+    ///
+    /// `onPageEvent` is the same thing narrowed to what the page sends. This is
+    /// what an application needs to react to its own menu, because a menu click
+    /// never involves a page.
+    pub fn listen(
+        self: *App,
+        event_name: []const u8,
+        comptime T: type,
+        ctx: *T,
+        handler: *const fn (state: *T, window: u32, payload: json.Value) void,
+    ) !void {
+        const Thunk = struct {
+            state: *T,
+            handler: *const fn (state: *T, window: u32, payload: json.Value) void,
+
+            fn call(c: ?*anyopaque, window: u32, payload: json.Value) void {
+                const self_: *@This() = @ptrCast(@alignCast(c.?));
+                self_.handler(self_.state, window, payload);
+            }
+        };
+
+        const thunk = try self.arena.allocator().create(Thunk);
+        thunk.* = .{ .state = ctx, .handler = handler };
+        _ = try self.ipc.addAppListener(event_name, Thunk.call, @ptrCast(thunk));
+    }
+
+    /// The process's I/O handle, for reading and writing files. Zig 0.17 routes
+    /// file access through this rather than through `std.fs`.
+    ///
+    /// Null when `AppOptions.io` was not set, which is a programming mistake
+    /// rather than a runtime condition: a program that reads files has the
+    /// handle from `std.process.Init`.
+    pub fn io(self: *const App) ?std.Io {
+        return self.io_handle;
     }
 
     /// How many plugins the application added.
