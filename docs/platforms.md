@@ -93,10 +93,34 @@ part of it is untested.
 
 ## macOS
 
-Backend: `src/platform/macos/`. **Not started**, same as Windows.
+Backend: `src/platform/macos/`. **Written, compiles for `aarch64-macos` and
+`x86_64-macos`, never run.** There is no Mac on the machine this was written
+on, so nothing below has been observed working; the table says what the code
+does, not what has been seen.
 
-The planned shape is AppKit for windows and menus, WKWebView for pages, and
-Metal for the native surface.
+The backend talks to AppKit and WebKit through the Objective-C runtime, which
+is opened by name (`/usr/lib/libobjc.A.dylib`) rather than linked: macOS has no
+`dlopen` step for it, and opening it by name means a Linux host can compile the
+backend without a macOS SDK. On a Mac the frameworks still have to be linked —
+`zig build -Dtarget=aarch64-macos` needs the SDK to find them.
+
+| Feature | State |
+| --- | --- |
+| Window creation, title, frame, show/hide, focus | written |
+| Minimise, restore, zoom, always-on-top, full screen | written |
+| page and hybrid windows | `WKWebView`, written |
+| native windows | bitmap surface allocated, **no input** |
+| `evalJs` | written, but the reply is dropped: no completion block is built |
+| `injectScript` | **not written** — needs `WKUserScript` and a content controller |
+| window menus | **not written** — needs `NSMenu` |
+| tray, global shortcuts, desktop APIs | **not written** |
+| `myzig://` scheme | **not written** — a page is loaded from a URL the system can reach |
+| monitors, system theme | **not written** — the answers are "none" and "light" |
+
+Two things are absences rather than bugs, and both are marked in the code: a
+call from another thread is dropped instead of being run on a background thread
+(AppKit is not thread-safe, and hopping to the main queue needs a block), and a
+native window's mouse presses are not delivered to the application.
 
 ## What "not supported" looks like
 

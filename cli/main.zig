@@ -560,7 +560,7 @@ fn absPath(ctx: Ctx, out: []u8, path: []const u8) []const u8 {
     return out[0 .. n + 1 + path.len];
 }
 
-fn copyFile(ctx: Ctx, dir: std.Io.Dir, from: []const u8, to: []const u8, mode: u32) !void {
+fn copyFile(ctx: Ctx, dir: std.Io.Dir, from: []const u8, to: []const u8, mode: u16) !void {
     const data = try dir.readFileAlloc(ctx.io, from, ctx.gpa, .limited(512 * 1024 * 1024));
     defer ctx.gpa.free(data);
     try writeFile(ctx, dir, to, data);

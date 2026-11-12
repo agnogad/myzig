@@ -36,9 +36,11 @@ pub fn main() !void {
 
 ## Status
 
-Linux is the supported platform today. The Windows and macOS backends exist as
-stubs that return `NotSupported` from every entry point; they are listed in
-`docs/PROGRESS.md` and are not claimed to work.
+Linux is the supported platform today, and it is the only one anything has been
+run on. The Windows and macOS backends are written and compile for their
+targets, but no one has run them: they are not claimed to work, and
+`docs/platforms.md` lists each feature that is missing rather than pretending
+otherwise.
 
 | Area | State |
 | --- | --- |
@@ -49,7 +51,7 @@ stubs that return `NotSupported` from every entry point; they are listed in
 | Plugins | works |
 | `myzig` command line: `new`, `generate`, `package`, `package --deb`, `doctor` | works |
 | Windows backend (Win32 + WebView2) | compiles for Windows, never run |
-| macOS backend (AppKit + WKWebView) | not started |
+| macOS backend (AppKit + WKWebView) | compiles for macOS, never run |
 | Accessibility (AT-SPI) | done on Linux; not on Windows or macOS |
 | GPU rendering, text beyond Latin-1 | not started |
 

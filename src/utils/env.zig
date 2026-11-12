@@ -166,7 +166,16 @@ pub fn secureRandom(buf: []u8) void {
         }
         return;
     }
-    // macOS and the BSDs: getentropy fills at most 256 bytes per call.
+    // macOS and the BSDs do not have `getentropy` in libc as Zig declares it,
+    // but every one of them has `arc4random_buf`, which cannot fail and has no
+    // length limit.
+    if (builtin.os.tag == .macos or builtin.os.tag == .freebsd or
+        builtin.os.tag == .netbsd or builtin.os.tag == .openbsd)
+    {
+        arc4random_buf(buf.ptr, buf.len);
+        return;
+    }
+    // Anything else: `getentropy` fills at most 256 bytes per call.
     var filled: usize = 0;
     while (filled < buf.len) {
         const chunk = @min(buf.len - filled, 256);
@@ -174,6 +183,8 @@ pub fn secureRandom(buf: []u8) void {
         filled += chunk;
     }
 }
+
+extern fn arc4random_buf(buf: *anyopaque, len: usize) void;
 
 test "secure random fills distinct buffers" {
     var a: [16]u8 = undefined;

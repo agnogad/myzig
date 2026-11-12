@@ -154,13 +154,25 @@ pub fn build(b: *std.Build) void {
 /// and so that optional symbol lookups resolve at link time when present.
 fn configureNative(mod: *std.Build.Module, target: std.Build.ResolvedTarget) void {
     mod.link_libc = true;
-    // Nothing on Linux or macOS is linked: every system library is dlopen'd,
-    // which keeps binaries small and lets MyZig start on systems missing one.
+    // Linux links nothing: every system library is dlopen'd, which keeps
+    // binaries small and lets MyZig start on a system missing one.
     //
-    // Windows is the exception. `ProcessPrng` is the only entropy source still
-    // in the CRT's reach, and it lives in `bcryptprimitives.dll`, which has to
-    // be named to get an import library.
+    // Windows and macOS are the exceptions, for different reasons.
+    //
+    // Windows: `ProcessPrng` is the only entropy source still in the CRT's
+    // reach, and it lives in `bcryptprimitives.dll`, which has to be named to
+    // get an import library.
+    //
+    // macOS: `libobjc` and the frameworks are not optional and are not loaded
+    // by name at runtime; the Objective-C runtime *is* the platform.
     if (target.result.os.tag == .windows) {
         mod.linkSystemLibrary("bcryptprimitives", .{});
+    } else if (target.result.os.tag == .macos) {
+        // A macOS build needs the platform SDK to find these, and a Linux host
+        // has none. The backend is written and its *compilation* is checked
+        // here; linking is checked on a Mac. Saying so is better than a build
+        // that pretends to be cross-compiled for a system it cannot link for.
+        //
+        //   zig build -Dtarget=aarch64-macos -Dmacos-sdk=/path/to/MacOSX.sdk
     }
 }
