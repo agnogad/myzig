@@ -35,6 +35,7 @@ pub fn main() !void {
     // removed `std.posix.argv`.
     if (myzig.env.get("MYZIG_DESKTOP_EXAMPLE")) |v| {
         if (std.mem.eql(u8, v, "run-all")) env.query = "myzig://app/index.html?run=all";
+        if (std.mem.eql(u8, v, "run-dialogs")) env.query = "myzig://app/index.html?run=dialogs";
     }
     var gpa_state = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_state.deinit();

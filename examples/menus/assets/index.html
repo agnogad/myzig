@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Menus</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --fg: #1c1c1e;
+    --dim: #6b6b70;
+    --bg: #f6f6f8;
+    --card: #ffffff;
+    --line: #dcdce1;
+    --accent: #2f6fed;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fg: #ededf0;
+      --dim: #9a9aa2;
+      --bg: #17171a;
+      --card: #202024;
+      --line: #33333a;
+      --accent: #6f9dff;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 22px;
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: var(--fg);
+    background: var(--bg);
+  }
+  h1 { margin: 0 0 4px; font-size: 17px; font-weight: 600; }
+  p { margin: 0 0 16px; color: var(--dim); }
+  #log {
+    margin: 0;
+    padding: 14px;
+    min-height: 180px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--card);
+    font: 12px/1.7 ui-monospace, "SF Mono", Menlo, monospace;
+    color: var(--dim);
+    white-space: pre-wrap;
+  }
+  #log b { color: var(--accent); font-weight: 600; }
+  kbd {
+    padding: 1px 5px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    font: inherit;
+    font-size: 11px;
+  }
+</style>
+</head>
+<body>
+  <h1>Menu bar</h1>
+  <p>Use the menu above, or press <kbd>Ctrl</kbd>+<kbd>N</kbd>, <kbd>Ctrl</kbd>+<kbd>B</kbd> or <kbd>F12</kbd>.</p>
+  <pre id="log">Waiting for the bridge…</pre>
+  <script src="app.js"></script>
+</body>
+</html>

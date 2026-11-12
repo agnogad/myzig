@@ -127,6 +127,9 @@ pub const WindowState = struct {
     view: ?*const fn (ctx: *anyopaque) void = null,
     view_context: ?*anyopaque = null,
     kind: backend.ContentKind = .web,
+    /// The menu bar, when the window has one. The description is a value, so
+    /// the application may pass a temporary.
+    menu: ?@import("menu.zig").Menu = null,
 
     width: i32 = 800,
     height: i32 = 600,

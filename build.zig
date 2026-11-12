@@ -35,6 +35,8 @@ pub fn build(b: *std.Build) void {
         .{ .name = "counter-native", .path = "examples/counter-native/main.zig", .desc = "Native GPU-rendered counter UI" },
         .{ .name = "hybrid", .path = "examples/hybrid/main.zig", .desc = "Native chrome around a web view" },
         .{ .name = "desktop-api", .path = "examples/desktop-api/main.zig", .desc = "Clipboard, dialogs, notifications, tray" },
+        .{ .name = "menus", .path = "examples/menus/main.zig", .desc = "Menu bar with accelerators" },
+        .{ .name = "tray", .path = "examples/tray/main.zig", .desc = "Tray icon and global shortcut" },
     };
 
     const run_all = b.step("examples", "Build all examples");

@@ -207,6 +207,8 @@ pub const EventSink = struct {
         surface_frame_requested: *const fn (ctx: *anyopaque, id: u32) void,
 
         // ------------------------------------------------------------- desktop
+        /// A menu entry the user clicked. `id` is the application's command id.
+        menu_command: *const fn (ctx: *anyopaque, id: []const u8) void,
         notification_clicked: *const fn (ctx: *anyopaque, tag: []const u8) void,
         tray_clicked: *const fn (ctx: *anyopaque, item: u32) void,
         shortcut_pressed: *const fn (ctx: *anyopaque, accelerator: []const u8) void,
@@ -298,6 +300,9 @@ pub const EventSink = struct {
     }
     pub fn surfaceFrameRequested(self: EventSink, id: u32) void {
         self.vtable.surface_frame_requested(self.ctx, id);
+    }
+    pub fn menuCommand(self: EventSink, id: []const u8) void {
+        self.vtable.menu_command(self.ctx, id);
     }
     pub fn notificationClicked(self: EventSink, tag: []const u8) void {
         self.vtable.notification_clicked(self.ctx, tag);

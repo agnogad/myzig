@@ -39,6 +39,8 @@ const ffi = @import("ffi.zig");
 const windows = @import("windows.zig");
 const webview = @import("webview.zig");
 const dispatch = @import("dispatch.zig");
+const gmenu = @import("gmenu.zig");
+const gtray = @import("gtray.zig");
 
 pub const BackendImpl = struct {
     app: ?*app_mod.App = null,
@@ -50,6 +52,12 @@ pub const BackendImpl = struct {
     initialised: bool = false,
     /// Signs handled by the dispatch layer.
     dispatch_source: u32 = 0,
+    /// Allocator for long-lived backend state, owned by the app.
+    gpa: std.mem.Allocator = std.heap.page_allocator,
+
+    pub fn allocator(self: *BackendImpl) std.mem.Allocator {
+        return self.gpa;
+    }
 };
 
 fn selfOf(ctx: *anyopaque) *BackendImpl {
@@ -76,6 +84,7 @@ pub fn vtable() app_mod.App.Backend.Vtable {
         .eval_js = evalJs,
         .inject_script = injectScript,
         .open_devtools = openDevtools,
+        .set_menu = setMenu,
         .monitors = monitors,
         .system_theme = systemTheme,
         .wake = wake,
@@ -95,6 +104,7 @@ fn init(ctx: *anyopaque, app: *app_mod.App) errors.InitError!void {
     const self = selfOf(ctx);
     self.app = app;
     self.main_thread = std.Thread.getCurrentId();
+    self.gpa = app.gpa;
 
     ffi.load() catch |e| {
         log.err("cannot load GTK: {s}", .{errors.name(e)});
@@ -110,6 +120,16 @@ fn init(ctx: *anyopaque, app: *app_mod.App) errors.InitError!void {
         // on.
         env.set("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
     }
+
+    // Menu clicks reach the application through the app's event sink, so the
+    // menu builder only needs a callback, never the app pointer.
+    gmenu.setCommandSink(.{
+        .allocator = self.gpa,
+        .report = reportMenuCommand,
+        .ctx = self,
+    });
+    gtray.installErrorHandler();
+    gtray.setClickSink(.{ .report = reportTrayClick, .ctx = self });
 
     // Name the program before GTK runs: GTK takes the WM class and app id from
     // it, and WebKitGTK names the page data directories after it.
@@ -234,6 +254,25 @@ fn evalJs(ctx: *anyopaque, id: u32, code: []const u8) errors.WindowError!void {
 fn injectScript(ctx: *anyopaque, id: u32, code: []const u8) errors.WindowError!void {
     _ = ctx;
     if (!webview.inject(id, code)) return errors.WindowError.InvalidWindow;
+}
+
+/// Builds the window's menu bar from the portable description.
+fn setMenu(ctx: *anyopaque, id: u32, m: @import("../../menu.zig").Menu) errors.WindowError!void {
+    const self = selfOf(ctx);
+    return windows.attachMenu(self.allocator(), id, m);
+}
+
+fn reportTrayClick(ctx: *anyopaque, _: []const u8) void {
+    const self = selfOf(ctx);
+    const app = self.app orelse return;
+    // The tray is a single icon, so its click has one id.
+    app.sink().trayClicked(1);
+}
+
+fn reportMenuCommand(ctx: *anyopaque, id: []const u8) void {
+    const self = selfOf(ctx);
+    const app = self.app orelse return;
+    app.sink().menuCommand(id);
 }
 
 fn openDevtools(ctx: *anyopaque, id: u32) void {

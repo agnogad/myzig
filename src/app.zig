@@ -38,6 +38,7 @@ const paths_mod = @import("utils/paths.zig");
 const env = @import("utils/env.zig");
 const ipc_mod = @import("ipc/ipc.zig");
 const desktop_mod = @import("platform/desktop.zig");
+const menu_mod = @import("menu.zig");
 const json = @import("json.zig");
 const window_mod = @import("window.zig");
 
@@ -464,6 +465,68 @@ pub const App = struct {
         .vtable = &desktop_vtable,
     };
 
+    // ---------------------------------------------------------------- tray
+
+    /// Shows a tray icon from a themed icon name. Returns false when the
+    /// desktop has no status area, which is a real limitation: the application
+    /// should fall back to a window.
+    pub fn createTray(self: *App, icon_name: []const u8, tooltip: []const u8) bool {
+        if (self.phase != .running) return false;
+        return switch (backend.current) {
+            .linux => @import("platform/linux/gtray.zig").create(self.gpa, icon_name, tooltip),
+            else => false,
+        };
+    }
+
+    /// Removes the tray icon, if any.
+    pub fn destroyTray(self: *App) void {
+        if (self.phase != .running) return;
+        switch (backend.current) {
+            .linux => @import("platform/linux/gtray.zig").destroy(),
+            else => {},
+        }
+    }
+
+    /// Binds a global accelerator, which fires while any application has focus.
+    ///
+    /// Fails with `error.NotSupported` on a session that forbids global grabs
+    /// and `error.AlreadyTaken` when another client holds the same combination.
+    /// The failure is reported rather than swallowed: an unbound shortcut is
+    /// indistinguishable from a broken one.
+    pub fn registerShortcut(self: *App, accel: []const u8) !void {
+        const parsed = menu_mod.Accelerator.parse(accel) catch return error.InvalidAccelerator;
+        if (self.phase != .running) return error.NotRunning;
+        return switch (backend.current) {
+            .linux => @import("platform/linux/gtray.zig").registerShortcut(self.gpa, .{
+                .accel = parsed,
+                .text = accel,
+            }),
+            else => error.NotSupported,
+        };
+    }
+
+    // ---------------------------------------------------------------- menu
+
+    /// Attaches a menu bar to a window. The menu is copied into the window's
+    /// state, so the caller does not need to keep it alive.
+    pub fn setMenu(self: *App, h: Window, m: menu_mod.Menu) !void {
+        if (!self.windowValid(h)) return error.InvalidWindow;
+        const st = self.windowState(h) orelse return error.InvalidWindow;
+        st.menu = m;
+        if (self.phase == .running) try self.applyMenu(h);
+    }
+
+    /// Rebuilds a window's menu bar from the stored description.
+    fn applyMenu(self: *App, h: Window) !void {
+        const st = self.windowState(h) orelse return error.InvalidWindow;
+        if (st.menu) |m| {
+            self.be.vtable.set_menu(self.be.ctx, h.id, m) catch |e| {
+                log.err("menu for window {d} could not be built: {s}", .{ h.id, @errorName(e) });
+                return e;
+            };
+        }
+    }
+
     /// Sends `payload` to every window subscribed to `name`. Returns the number
     /// of windows addressed.
     pub fn emit(self: *App, event: []const u8, payload: json.Value) usize {
@@ -502,6 +565,7 @@ pub const App = struct {
             eval_js: *const fn (ctx: *anyopaque, id: u32, code: []const u8) errors.WindowError!void,
             inject_script: *const fn (ctx: *anyopaque, id: u32, code: []const u8) errors.WindowError!void,
             open_devtools: *const fn (ctx: *anyopaque, id: u32) void,
+            set_menu: *const fn (ctx: *anyopaque, id: u32, m: menu_mod.Menu) errors.WindowError!void,
             monitors: *const fn (ctx: *anyopaque, out: []backend.MonitorInfo) usize,
             system_theme: *const fn (ctx: *anyopaque) events.Theme,
             wake: *const fn (ctx: *anyopaque) void,
@@ -740,6 +804,9 @@ pub const App = struct {
             _ = handle;
             return;
         };
+        // A menu set before `run` is stored with the window and applied here,
+        // once the native window exists to hang it on.
+        self.applyMenu(st.handle) catch {};
     }
 
     /// Looks up a window's state, or null when the handle is stale.
@@ -969,6 +1036,7 @@ pub const App = struct {
         .surface_resized = onSurfaceResized,
         .surface_input = onSurfaceInput,
         .surface_frame_requested = onSurfaceFrameRequested,
+        .menu_command = onMenuCommand,
         .notification_clicked = onNotificationClicked,
         .tray_clicked = onTrayClicked,
         .shortcut_pressed = onShortcutPressed,
@@ -1119,6 +1187,14 @@ pub const App = struct {
         _ = ctx;
         _ = id;
     }
+    fn onMenuCommand(ctx: *anyopaque, id: []const u8) void {
+        const self = fromCtx(ctx);
+        // A menu click is an application event: listeners on the Zig side and
+        // subscribers on the page both see it, with the same name the bridge
+        // documents.
+        _ = self.emit("menu:command", .{ .string = id });
+    }
+
     fn onNotificationClicked(ctx: *anyopaque, tag: []const u8) void {
         _ = ctx;
         _ = tag;

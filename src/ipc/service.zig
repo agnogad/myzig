@@ -35,6 +35,9 @@ pub const Method = struct {
     /// The number of arguments the generated TypeScript declares, so a call
     /// with the wrong count fails before the handler runs.
     arity: u8 = 0,
+    /// Documentation for the generated TypeScript. Optional; a method without
+    /// it still gets a declaration.
+    docs: []const u8 = "",
 };
 
 /// The set of methods an application exposes. Names are looked up by a

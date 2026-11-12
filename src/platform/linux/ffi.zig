@@ -35,6 +35,9 @@ pub const GTK_MESSAGE_QUESTION: c_int = 2;
 pub const GTK_MESSAGE_ERROR: c_int = 3;
 pub const GTK_DIALOG_MODAL: c_int = 1;
 pub const G_SPAWN_SEARCH_PATH: c_int = 1;
+pub const GTK_ORIENTATION_VERTICAL: c_int = 1;
+pub const GTK_ORIENTATION_HORIZONTAL: c_int = 0;
+pub const GTK_ACCEL_VISIBLE: c_int = 1;
 pub const gint = c_int;
 pub const gulong = c_ulong;
 pub const gpointer = *anyopaque;
@@ -57,8 +60,10 @@ pub const GtkClipboard = *anyopaque;
 pub const GtkFileFilter = *anyopaque;
 pub const GtkFileChooserDialog = *anyopaque;
 pub const GtkDialog = *anyopaque;
-pub const GtkContainer = *anyopaque;
 pub const GtkBox = *anyopaque;
+pub const GtkStatusIcon = *anyopaque;
+pub const GSimpleAction = *anyopaque;
+pub const GtkContainer = *anyopaque;
 pub const GdkWindow = *anyopaque;
 pub const GdkDisplay = *anyopaque;
 pub const GdkMonitor = *anyopaque;
@@ -236,6 +241,35 @@ pub var g_spawn_async: *const fn (
     child_pid: ?*c_int,
 ) callconv(.c) gboolean = undefined;
 
+pub var gtk_status_icon_new_from_icon_name: *const fn (name: [*:0]const u8) callconv(.c) ?GtkStatusIcon = undefined;
+pub var gtk_status_icon_set_tooltip_text: *const fn (icon: GtkStatusIcon, text: [*:0]const u8) callconv(.c) void = undefined;
+pub var gtk_status_icon_set_visible: *const fn (icon: GtkStatusIcon, visible: gboolean) callconv(.c) void = undefined;
+pub var gtk_status_icon_is_embedded: *const fn (icon: GtkStatusIcon) callconv(.c) gboolean = undefined;
+
+pub var gtk_menu_bar_new: *const fn () callconv(.c) ?GtkWidget = undefined;
+pub var gtk_menu_new: *const fn () callconv(.c) ?GtkWidget = undefined;
+pub var gtk_menu_item_new_with_label: *const fn (label: [*:0]const u8) callconv(.c) ?GtkWidget = undefined;
+pub var gtk_menu_item_new_with_mnemonic: *const fn (label: [*:0]const u8) callconv(.c) ?GtkWidget = undefined;
+pub var gtk_menu_item_set_submenu: *const fn (item: GtkWidget, submenu: ?GtkWidget) callconv(.c) void = undefined;
+pub var gtk_menu_item_set_label: *const fn (item: GtkWidget, label: [*:0]const u8) callconv(.c) void = undefined;
+pub var gtk_menu_shell_append: *const fn (shell: GtkWidget, child: GtkWidget) callconv(.c) void = undefined;
+pub var gtk_separator_menu_item_new: *const fn () callconv(.c) ?GtkWidget = undefined;
+pub var gtk_check_menu_item_new_with_label: *const fn (label: [*:0]const u8) callconv(.c) ?GtkWidget = undefined;
+pub var gtk_check_menu_item_set_active: *const fn (item: GtkWidget, active: gboolean) callconv(.c) void = undefined;
+pub var gtk_check_menu_item_get_active: *const fn (item: GtkWidget) callconv(.c) gboolean = undefined;
+pub var gtk_box_pack_start: *const fn (b: GtkBox, child: GtkWidget, expand: gboolean, fill: gboolean, padding: u32) callconv(.c) void = undefined;
+pub var gtk_widget_set_sensitive: *const fn (w: GtkWidget, sensitive: gboolean) callconv(.c) void = undefined;
+pub var gtk_accel_group_new: *const fn () callconv(.c) ?gpointer = undefined;
+pub var gtk_window_add_accel_group: *const fn (w: GtkWindow, group: gpointer) callconv(.c) void = undefined;
+pub var gtk_widget_add_accelerator: *const fn (
+    w: GtkWidget,
+    accel_signal: [*:0]const u8,
+    group: gpointer,
+    accel_key: c_uint,
+    accel_mods: c_int,
+    flags: c_int,
+) callconv(.c) void = undefined;
+
 pub var gtk_window_set_default_icon_name: *const fn (name: [*:0]const u8) callconv(.c) void = undefined;
 pub var gtk_window_set_type_hint: *const fn (w: GtkWindow, hint: c_int) callconv(.c) void = undefined;
 pub var gtk_window_present: *const fn (w: GtkWindow) callconv(.c) void = undefined;
@@ -247,8 +281,9 @@ pub var gtk_widget_grab_focus: *const fn (w: GtkWidget) callconv(.c) void = unde
 pub var gtk_widget_queue_draw: *const fn (w: GtkWidget) callconv(.c) void = undefined;
 pub var gtk_widget_set_can_focus: *const fn (w: GtkWidget, v: gboolean) callconv(.c) void = undefined;
 pub var gtk_widget_add_events: *const fn (w: GtkWidget, ev: gint) callconv(.c) void = undefined;
-pub var gtk_box_new: *const fn (orientation: c_int, spacing: gint) callconv(.c) GtkBox = undefined;
+pub var gtk_box_new: *const fn (orientation: c_int, spacing: gint) callconv(.c) ?GtkBox = undefined;
 pub var gtk_container_add: *const fn (c: GtkContainer, child: GtkWidget) callconv(.c) void = undefined;
+pub var gtk_widget_get_parent: *const fn (w: GtkWidget) callconv(.c) ?GtkWidget = undefined;
 pub var gtk_container_remove: *const fn (c: GtkContainer, child: GtkWidget) callconv(.c) void = undefined;
 pub var gtk_window_set_default_icon_from_file: *const fn (f: [*:0]const u8, err: *?*GError) callconv(.c) gboolean = undefined;
 pub var gtk_settings_get_default: *const fn () callconv(.c) ?gpointer = undefined;
@@ -526,6 +561,26 @@ const gtk_syms = .{
     .{ "gtk_window_unfullscreen", "gtk_window_unfullscreen" },
     .{ "gtk_window_set_geometry_hints", "gtk_window_set_geometry_hints" },
     .{ "gtk_window_set_default_icon_name", "gtk_window_set_default_icon_name" },
+    .{ "gtk_status_icon_new_from_icon_name", "gtk_status_icon_new_from_icon_name" },
+    .{ "gtk_status_icon_set_tooltip_text", "gtk_status_icon_set_tooltip_text" },
+    .{ "gtk_status_icon_set_visible", "gtk_status_icon_set_visible" },
+    .{ "gtk_status_icon_is_embedded", "gtk_status_icon_is_embedded" },
+    .{ "gtk_menu_bar_new", "gtk_menu_bar_new" },
+    .{ "gtk_menu_new", "gtk_menu_new" },
+    .{ "gtk_menu_item_new_with_label", "gtk_menu_item_new_with_label" },
+    .{ "gtk_menu_item_new_with_mnemonic", "gtk_menu_item_new_with_mnemonic" },
+    .{ "gtk_menu_item_set_submenu", "gtk_menu_item_set_submenu" },
+    .{ "gtk_menu_item_set_label", "gtk_menu_item_set_label" },
+    .{ "gtk_menu_shell_append", "gtk_menu_shell_append" },
+    .{ "gtk_separator_menu_item_new", "gtk_separator_menu_item_new" },
+    .{ "gtk_check_menu_item_new_with_label", "gtk_check_menu_item_new_with_label" },
+    .{ "gtk_check_menu_item_set_active", "gtk_check_menu_item_set_active" },
+    .{ "gtk_check_menu_item_get_active", "gtk_check_menu_item_get_active" },
+    .{ "gtk_box_pack_start", "gtk_box_pack_start" },
+    .{ "gtk_widget_set_sensitive", "gtk_widget_set_sensitive" },
+    .{ "gtk_accel_group_new", "gtk_accel_group_new" },
+    .{ "gtk_window_add_accel_group", "gtk_window_add_accel_group" },
+    .{ "gtk_widget_add_accelerator", "gtk_widget_add_accelerator" },
     .{ "gtk_clipboard_get", "gtk_clipboard_get" },
     .{ "gtk_clipboard_wait_for_text", "gtk_clipboard_wait_for_text" },
     .{ "gtk_clipboard_set_text", "gtk_clipboard_set_text" },
@@ -555,6 +610,7 @@ const gtk_syms = .{
     .{ "gtk_widget_add_events", "gtk_widget_add_events" },
     .{ "gtk_box_new", "gtk_box_new" },
     .{ "gtk_container_add", "gtk_container_add" },
+    .{ "gtk_widget_get_parent", "gtk_widget_get_parent" },
     .{ "gtk_container_remove", "gtk_container_remove" },
     .{ "gtk_events_pending", "gtk_events_pending" },
     .{ "gtk_main", "gtk_main" },
@@ -744,8 +800,6 @@ pub const GDK_WINDOW_TYPE_HINT_NORMAL: c_int = 0;
 pub const GDK_WINDOW_TYPE_HINT_DIALOG: c_int = 1;
 pub const GDK_WINDOW_TYPE_HINT_UTILITY: c_int = 2;
 // GtkOrientation
-pub const GTK_ORIENTATION_HORIZONTAL: c_int = 0;
-pub const GTK_ORIENTATION_VERTICAL: c_int = 1;
 // WebKitUserScriptInjectionTime
 pub const WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START: c_int = 0;
 pub const WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_END: c_int = 1;

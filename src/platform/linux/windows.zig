@@ -21,6 +21,8 @@
 const std = @import("std");
 const backend = @import("../backend.zig");
 const errors = @import("../../errors.zig");
+const gmenu = @import("gmenu.zig");
+const menu_mod = @import("../../menu.zig");
 const events = @import("../../events.zig");
 const app_mod = @import("../../app.zig");
 const log = @import("../../log.zig");
@@ -37,6 +39,13 @@ pub const Entry = struct {
     web: ?ffi.WebKitWebView = null,
     /// The container that holds the web view and any content.
     root: ?ffi.GtkWidget = null,
+    /// The vertical box installed when the window has a menu bar.
+    box: ?ffi.GtkWidget = null,
+    /// The menu bar inside `box`, so a replaced menu can be removed.
+    bar: ?ffi.GtkWidget = null,
+    /// The window content before a menu bar was installed, so a new menu can
+    /// re-parent it instead of losing it.
+    content: ?ffi.GtkWidget = null,
     /// Set while the framework is destroying the window, so GTK's `destroy`
     /// signal does not report it a second time.
     destroying: bool = false,
@@ -178,6 +187,66 @@ fn onFocus(id: u32, focused: bool) void {
 }
 
 // ------------------------------------------------------------------ create
+
+/// Replaces the window's content with a vertical box holding a menu bar and the
+/// previous content. Called again for a new menu: the old bar is destroyed and
+/// only the content survives.
+pub fn attachMenu(allocator: std.mem.Allocator, id: u32, m: menu_mod.Menu) errors.WindowError!void {
+    const entry = registry.getPtr(id) orelse return errors.WindowError.InvalidWindow;
+    const gtk_window = entry.window;
+
+    // Remember the real content once, so a second menu does not nest a box in
+    // a box with an orphaned web view between them.
+    if (entry.content == null) {
+        entry.content = if (entry.web) |w| w else if (entry.box) |b| b else null;
+    }
+    const content = entry.content;
+
+    // Replacing a menu keeps the existing box and only swaps the bar, so the
+    // web view is never re-parented: re-parenting reloads the page and loses
+    // its state.
+    if (entry.box) |existing| {
+        if (entry.bar) |old| {
+            ffi.gtk_container_remove(existing, old);
+            ffi.gtk_widget_destroy(old);
+        }
+        const bar = gmenu.build(allocator, id, gtk_window, m) orelse
+            return errors.WindowError.NotSupported;
+        ffi.gtk_box_pack_start(existing, bar.bar, ffi.FALSE, ffi.FALSE, 0);
+        // The bar must come before the content; GTK keeps insertion order, so
+        // reorder once by repacking the content at the end.
+        if (content) |c| {
+            ffi.gtk_container_remove(existing, c);
+            ffi.gtk_box_pack_start(existing, c, ffi.TRUE, ffi.TRUE, 0);
+        }
+        ffi.gtk_widget_show_all(existing);
+        entry.bar = bar.bar;
+        return;
+    }
+
+    const box = ffi.gtk_box_new(ffi.GTK_ORIENTATION_VERTICAL, 0) orelse
+        return errors.WindowError.NotSupported;
+    const bar_built = gmenu.build(allocator, id, gtk_window, m) orelse {
+        ffi.gtk_widget_destroy(box);
+        return errors.WindowError.NotSupported;
+    };
+    ffi.gtk_box_pack_start(box, bar_built.bar, ffi.FALSE, ffi.FALSE, 0);
+    if (content) |c| {
+        // `gtk_container_remove` drops the container's reference, destroying the
+        // widget if nothing else holds it. Holding one reference across the move
+        // is what keeps the web view (and the loaded page) alive.
+        _ = ffi.g_object_ref(@ptrCast(c));
+        defer _ = ffi.g_object_unref(@ptrCast(c));
+        if (ffi.gtk_widget_get_parent(c)) |parent| {
+            ffi.gtk_container_remove(parent, c);
+        }
+        ffi.gtk_box_pack_start(box, c, ffi.TRUE, ffi.TRUE, 0);
+    }
+    ffi.gtk_container_add(gtk_window, box);
+    ffi.gtk_widget_show_all(box);
+    entry.box = box;
+    entry.bar = bar_built.bar;
+}
 
 pub fn create(app: *app_mod.App, id: u32, opts: backend.WindowOptions) CreateError!void {
     if (id == 0) return error.InvalidArgument;

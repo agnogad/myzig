@@ -279,7 +279,7 @@ pub const Exchange = struct {
         defer code.deinit(self.allocator);
         code.appendSlice(self.allocator, "window.__myzig && window.__myzig.receive(") catch return;
         code.appendSlice(self.allocator, batch) catch return;
-        code.appendSlice(self.allocator, "])") catch return;
+        code.appendSlice(self.allocator, ")") catch return;
         _ = s.eval(s.ctx, window, code.items);
     }
 
@@ -598,4 +598,33 @@ test "event payloads are escaped" {
     ex.deliver(1, "{\"t\":\"sub\",\"e\":\"say\"}");
     _ = ex.emit("say", .{ .string = "quote\" and \\ backslash" });
     try testing.expect(std.mem.indexOf(u8, rec.last(), "quote\\\" and \\\\ backslash") != null);
+}
+
+test "an event reaches the page as a single well-formed call" {
+    // Regression: the batch was already a complete JSON array, and the sender
+    // appended an extra `]`, so every event arrived as a syntax error and no
+    // subscriber ever fired.
+    var ex = Exchange.init(testing.allocator);
+    defer ex.deinit();
+
+    var rec = Recorder{};
+    defer rec.deinit(testing.allocator);
+    newExchange(&ex, &rec);
+
+    try ex.subscribe(1, "menu:command");
+    const sent = ex.emit("menu:command", .{ .string = "file.new" });
+    try testing.expectEqual(@as(usize, 1), sent);
+
+    const code = rec.last();
+    try testing.expect(std.mem.startsWith(u8, code, "window.__myzig && window.__myzig.receive("));
+    try testing.expect(std.mem.endsWith(u8, code, ")"));
+
+    // Exactly one array, and it parses back to the message the page expects.
+    const inner = code["window.__myzig && window.__myzig.receive(".len .. code.len - 1];
+    // The batch ends with exactly one `]`: a second one is the bug this test
+    // covers, and it shows up as `...]]`.
+    try testing.expect(!std.mem.endsWith(u8, inner, "]]"));
+    var parsed = try json.parse(testing.allocator, inner);
+    defer parsed.parser.deinit();
+    try testing.expectEqual(@as(usize, 1), parsed.value.array.len);
 }

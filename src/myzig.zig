@@ -71,6 +71,10 @@ pub const platform = @import("platform/platform.zig");
 
 // ------------------------------------------------------------------ support
 pub const events = @import("events.zig");
+pub const menu = @import("menu.zig");
+pub const Menu = @import("menu.zig").Menu;
+pub const MenuItem = @import("menu.zig").Item;
+pub const Accelerator = @import("menu.zig").Accelerator;
 pub const allocator = @import("allocator.zig");
 pub const json = @import("json.zig");
 pub const errors = @import("errors.zig");

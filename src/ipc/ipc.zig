@@ -14,6 +14,7 @@ pub const decode = @import("decode.zig");
 pub const service = @import("service.zig");
 pub const exchange = @import("exchange.zig");
 pub const builtin = @import("builtin.zig");
+pub const tsgen = @import("tsgen.zig");
 
 pub const Result = protocol.Result;
 pub const Code = protocol.Code;
@@ -27,4 +28,5 @@ test {
     _ = service;
     _ = exchange;
     _ = builtin;
+    _ = tsgen;
 }

@@ -123,13 +123,19 @@
     return api.call("App.info");
   });
 
-  // `myzig://app/index.html?run=all` exercises every control once, so the
-  // example can be verified without synthetic mouse input.
-  if (location.search.indexOf("run=all") !== -1) {
-    ["copy", "paste", "info"].forEach(function (id) {
+  // `?run=all` exercises the controls that do not open a modal, so the example
+  // can be verified without synthetic mouse input. `?run=dialogs` opens the
+  // message box, which needs a key press to close.
+  var query = location.search;
+  if (query.indexOf("run=all") !== -1) {
+    ["copy", "paste", "info"].forEach(function (id, i) {
       setTimeout(function () {
         document.getElementById(id).click();
-      }, 300 * (1 + ["copy", "paste", "info"].indexOf(id)));
+      }, 300 * (1 + i));
     });
+  } else if (query.indexOf("run=dialogs") !== -1) {
+    setTimeout(function () {
+      document.getElementById("ask").click();
+    }, 500);
   }
 })();

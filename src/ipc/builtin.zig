@@ -44,18 +44,25 @@ pub fn fill(out: *[count]ipc.service.Method, app: *app_mod.App) void {
     out.* = methods(app);
 }
 
+/// The same list with no application attached. Only names, arity and
+/// documentation are meaningful: calling one of these would trap. It exists so
+/// `myzig generate` can describe the built-ins without starting an app.
+pub fn fillInert(out: *[count]ipc.service.Method) void {
+    out.* = methods(undefined);
+}
+
 /// Every built-in method. `App.init` registers all of them.
 pub fn methods(app: *app_mod.App) [count]ipc.service.Method {
     return .{
-        .{ .name = "Clipboard.readText", .invoke = readText, .arity = 0, .ctx = app },
-        .{ .name = "Clipboard.writeText", .invoke = writeText, .arity = 1, .ctx = app },
-        .{ .name = "Dialog.open", .invoke = dialogOpen, .arity = 0, .ctx = app },
-        .{ .name = "Dialog.save", .invoke = dialogSave, .arity = 0, .ctx = app },
-        .{ .name = "Dialog.message", .invoke = dialogMessage, .arity = 0, .ctx = app },
-        .{ .name = "Notification.show", .invoke = notificationShow, .arity = 0, .ctx = app },
-        .{ .name = "Shell.openExternal", .invoke = openExternal, .arity = 1, .ctx = app },
-        .{ .name = "App.version", .invoke = appVersion, .arity = 0, .ctx = app },
-        .{ .name = "App.info", .invoke = appInfo, .arity = 0, .ctx = app },
+        .{ .name = "Clipboard.readText", .invoke = readText, .arity = 0, .ctx = app, .docs = "Reads clipboard text, or null when it holds none." },
+        .{ .name = "Clipboard.writeText", .invoke = writeText, .arity = 1, .ctx = app, .docs = "Puts text on the clipboard. False when the desktop refused." },
+        .{ .name = "Dialog.open", .invoke = dialogOpen, .arity = 0, .ctx = app, .docs = "Shows an open dialog. Resolves with the chosen paths, or null when cancelled." },
+        .{ .name = "Dialog.save", .invoke = dialogSave, .arity = 0, .ctx = app, .docs = "Shows a save dialog. Resolves with the chosen path, or null when cancelled." },
+        .{ .name = "Dialog.message", .invoke = dialogMessage, .arity = 0, .ctx = app, .docs = "Shows a message box. Resolves with the index of the button pressed." },
+        .{ .name = "Notification.show", .invoke = notificationShow, .arity = 0, .ctx = app, .docs = "Shows a desktop notification. False when the desktop refused." },
+        .{ .name = "Shell.openExternal", .invoke = openExternal, .arity = 1, .ctx = app, .docs = "Opens a URL in the user's browser." },
+        .{ .name = "App.version", .invoke = appVersion, .arity = 0, .ctx = app, .docs = "The framework version this window runs." },
+        .{ .name = "App.info", .invoke = appInfo, .arity = 0, .ctx = app, .docs = "The application's name, id and whether this is a dev build." },
         .{ .name = "Window.show", .invoke = windowShow, .arity = 1, .ctx = app },
         .{ .name = "Window.hide", .invoke = windowHide, .arity = 0, .ctx = app },
         .{ .name = "Window.minimize", .invoke = windowMinimize, .arity = 0, .ctx = app },

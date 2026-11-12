@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Tray</title>
+<style>
+  :root { color-scheme: light dark; --fg:#1c1c1e; --dim:#6b6b70; --bg:#f6f6f8; --card:#fff; --line:#dcdce1; }
+  @media (prefers-color-scheme: dark) { :root { --fg:#ededf0; --dim:#9a9aa2; --bg:#17171a; --card:#202024; --line:#33333a; } }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:22px; font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; color:var(--fg); background:var(--bg); }
+  h1 { margin:0 0 6px; font-size:17px; font-weight:600; }
+  ol { margin:0 0 16px; padding-left:20px; color:var(--dim); }
+  pre { margin:0; padding:14px; min-height:150px; border:1px solid var(--line); border-radius:10px;
+        background:var(--card); font:12px/1.7 ui-monospace,"SF Mono",Menlo,monospace; color:var(--dim); white-space:pre-wrap; }
+</style>
+</head>
+<body>
+  <h1>Tray and global shortcut</h1>
+  <ol>
+    <li>A tray icon appears in the status area while this app runs.</li>
+    <li>Press <b>Ctrl+Alt+T</b> from any application to fire the shortcut.</li>
+    <li>A tray click is reported as <code>tray:click</code>.</li>
+  </ol>
+  <pre id="log">Waiting for the bridge…</pre>
+  <script src="app.js"></script>
+</body>
+</html>

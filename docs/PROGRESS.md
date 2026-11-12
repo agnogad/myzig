@@ -13,8 +13,8 @@ here only once it compiles, has tests, and has been run.
 | --- | --- | --- |
 | 0 | Core: allocators, JSON, main-thread loop, app lifecycle, testing backend | **Done** |
 | 1 | Linux backend: GTK 3 windows, WebKitGTK pages, `myzig://` scheme, bridge injection | **Done** |
-| 2 | Typed IPC: service binding, events, TypeScript client generation | **Mostly done** (TS generation pending) |
-| 3 | Desktop APIs: clipboard, dialogs, notifications, tray, menus, shortcuts | **In progress** (clipboard, dialogs, notifications done) |
+| 2 | Typed IPC: service binding, events, TypeScript client generation | **Done** |
+| 3 | Desktop APIs: clipboard, dialogs, notifications, tray, menus, shortcuts | **Done** |
 | 4 | Native UI toolkit: layout, GPU rendering, accessibility | Not started |
 | 5 | Windows backend: Win32 + WebView2 | Not started |
 | 6 | macOS backend: AppKit + WKWebView | Not started |
@@ -47,18 +47,28 @@ Verified by running the examples, not by reading the code:
   `myzig://app/index.html` automatically.
 * A page's `console.log` reaches the terminal, so the JavaScript side can be
   debugged without a screen.
+* **Menus, live**: `menus` builds File/View/Theme/Help from a portable model;
+  the bar is drawn, opens, shows its accelerators (Ctrl+N, Ctrl+O, Ctrl+Q), and
+  a click arrives in the page as `menu:command` with the Zig-side id.
+* **A message box, live**: `desktop-api` opened a `Dialog.message`; the answer
+  came back to the page (`dismissed` on Escape).
+* **A global shortcut, live**: `tray` bound `Ctrl+Alt+T` through an X11 key
+  grab and reported `bound`.
+* **The tray, honestly**: under Xvfb there is no status area, so `createTray`
+  returned false and the example printed `not shown (no status area)` instead of
+  pretending the icon exists.
+* **`myzig generate`** writes `myzig-client.d.ts`; the output compiles under
+  `tsc --strict --noEmit`.
 
 ## What is stubbed
 
 These compile and run but do not yet do their job. Each says so in its own
 source file and in the example that exercises it:
 
-* TypeScript client generation and `myzig generate` (the last piece of
-  milestone 2). Calls, events, subscriptions and cancellation all work.
-* File and message dialogs and notifications are implemented but not yet
-  verified on screen: they block on user input, so the test scripts check
-  compilation and the call path rather than clicking them.
-* Tray icons, menus and global shortcuts (milestone 3).
+* Notifications are built on `notify-send`; a desktop without a notification
+  daemon gets `false`, not a silent drop. Not yet verified on a real session.
+* Global shortcuts are X11 only. Wayland forbids global grabs by design, so
+  `registerShortcut` returns `error.NotSupported` there.
 * Native UI rendering (milestone 4).
 * Native UI: `counter-native` opens a window and prints that the toolkit is not
   there yet (milestone 4).
