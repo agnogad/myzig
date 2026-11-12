@@ -135,6 +135,10 @@ pub const Code = enum {
 pub const Result = union(enum) {
     /// Serialised into the reply's `v`.
     ok: json.Value,
+    /// Already-encoded JSON for `v`, appended verbatim. Use this when a handler
+    /// builds the reply itself (a list of paths, a small object), which avoids
+    /// encoding into a `json.Value` it would then have to keep alive.
+    ok_raw: []const u8,
     /// Serialised into `m` and `c`.
     err: Failure,
 
@@ -145,6 +149,13 @@ pub const Result = union(enum) {
 
     pub fn success(value: json.Value) Result {
         return .{ .ok = value };
+    }
+
+    /// A handler that produced its own JSON text. The slice must stay valid
+    /// until the exchange has encoded it, which is before the handler returns
+    /// control to the loop.
+    pub fn successRaw(text: []const u8) Result {
+        return .{ .ok_raw = text };
     }
 
     pub fn fail(code: Code, message: []const u8) Result {

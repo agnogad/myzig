@@ -13,8 +13,8 @@ here only once it compiles, has tests, and has been run.
 | --- | --- | --- |
 | 0 | Core: allocators, JSON, main-thread loop, app lifecycle, testing backend | **Done** |
 | 1 | Linux backend: GTK 3 windows, WebKitGTK pages, `myzig://` scheme, bridge injection | **Done** |
-| 2 | Typed IPC: service binding, events, TypeScript client generation | Not started |
-| 3 | Desktop APIs: clipboard, dialogs, notifications, tray, menus, shortcuts | Not started |
+| 2 | Typed IPC: service binding, events, TypeScript client generation | **Mostly done** (TS generation pending) |
+| 3 | Desktop APIs: clipboard, dialogs, notifications, tray, menus, shortcuts | **In progress** (clipboard, dialogs, notifications done) |
 | 4 | Native UI toolkit: layout, GPU rendering, accessibility | Not started |
 | 5 | Windows backend: Win32 + WebView2 | Not started |
 | 6 | macOS backend: AppKit + WKWebView | Not started |
@@ -36,16 +36,32 @@ Verified by running the examples, not by reading the code:
 * Runtime symbol loading: MyZig links no GTK or WebKit. `hello-window` never
   maps WebKitGTK; `hello-webview` does, on demand.
 * Missing libraries produce a named error, not a loader crash before `main`.
+* **Typed IPC round trip, live**: `ipc-greeter`'s page called
+  `Greeter.greet("Ada")` and rendered the Zig reply
+  `Hello, Ada! You are greeting #1.` in a real window.
+* **Built-in desktop services, live** in `desktop-api`:
+  `clipboard.writeText` → `copied 17 characters`,
+  `clipboard.readText` → the same text back, and
+  `App.info` → `{"name":"Desktop API","id":"dev.myzig.desktop-api","dev":true}`.
+* A window created with an embedded `frontend` and no `url` serves
+  `myzig://app/index.html` automatically.
+* A page's `console.log` reaches the terminal, so the JavaScript side can be
+  debugged without a screen.
 
 ## What is stubbed
 
 These compile and run but do not yet do their job. Each says so in its own
 source file and in the example that exercises it:
 
-* IPC calls, events and TypeScript generation (milestone 2).
-* Clipboard, dialogs, tray, menus, notifications (milestone 3).
-* Native UI: `counter-native` and `desktop-api` open a window and print that the
-  toolkit is not there yet (milestone 4).
+* TypeScript client generation and `myzig generate` (the last piece of
+  milestone 2). Calls, events, subscriptions and cancellation all work.
+* File and message dialogs and notifications are implemented but not yet
+  verified on screen: they block on user input, so the test scripts check
+  compilation and the call path rather than clicking them.
+* Tray icons, menus and global shortcuts (milestone 3).
+* Native UI rendering (milestone 4).
+* Native UI: `counter-native` opens a window and prints that the toolkit is not
+  there yet (milestone 4).
 * The Windows and macOS backends return `NotSupported` from every entry point.
 
 ## Test suite

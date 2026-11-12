@@ -41,9 +41,25 @@ pub const DecodeError = error{
 pub const Args = struct {
     items: []const json.Value,
     index: usize = 0,
+    /// The window that sent this call. Set by the exchange, never by the page,
+    /// so a handler can act on the caller's window without trusting an
+    /// argument.
+    sender: ?u32 = null,
 
     pub fn init(items: []const json.Value) Args {
         return .{ .items = items };
+    }
+
+    /// The id of the window that made this call, or null when the call did not
+    /// come from a window (a queued call in a test, for example).
+    pub fn windowId(self: *const Args) ?u32 {
+        return self.sender;
+    }
+
+    /// Reads a whole number. JSON numbers that are not integral are rejected
+    /// rather than truncated, so `setSize(100.5, 200)` fails visibly.
+    pub fn integer(self: *Args) DecodeError!i64 {
+        return self.intOf(i64);
     }
 
     /// The number of arguments the page supplied.

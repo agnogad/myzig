@@ -21,6 +21,20 @@ pub const gboolean = c_int;
 pub const guint = c_uint;
 /// `G_PRIORITY_DEFAULT_IDLE`: run when nothing more urgent is pending.
 pub const G_PRIORITY_DEFAULT_IDLE: c_int = 200;
+pub const GDK_CURRENT_TIME: u32 = 0;
+pub const GTK_FILE_CHOOSER_ACTION_OPEN: c_int = 0;
+pub const GTK_FILE_CHOOSER_ACTION_SAVE: c_int = 1;
+pub const GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER: c_int = 2;
+pub const GTK_RESPONSE_ACCEPT: c_int = -3;
+pub const GTK_RESPONSE_CANCEL: c_int = -6;
+pub const GTK_RESPONSE_OK: c_int = -5;
+pub const GTK_BUTTONS_NONE: c_int = 4;
+pub const GTK_MESSAGE_INFO: c_int = 0;
+pub const GTK_MESSAGE_WARNING: c_int = 1;
+pub const GTK_MESSAGE_QUESTION: c_int = 2;
+pub const GTK_MESSAGE_ERROR: c_int = 3;
+pub const GTK_DIALOG_MODAL: c_int = 1;
+pub const G_SPAWN_SEARCH_PATH: c_int = 1;
 pub const gint = c_int;
 pub const gulong = c_ulong;
 pub const gpointer = *anyopaque;
@@ -39,6 +53,10 @@ pub const GMainLoop = ?*anyopaque;
 pub const GMainContext = ?*anyopaque;
 pub const GtkWidget = *anyopaque;
 pub const GtkWindow = *anyopaque;
+pub const GtkClipboard = *anyopaque;
+pub const GtkFileFilter = *anyopaque;
+pub const GtkFileChooserDialog = *anyopaque;
+pub const GtkDialog = *anyopaque;
 pub const GtkContainer = *anyopaque;
 pub const GtkBox = *anyopaque;
 pub const GdkWindow = *anyopaque;
@@ -173,6 +191,51 @@ pub var gtk_window_unmaximize: *const fn (w: GtkWindow) callconv(.c) void = unde
 pub var gtk_window_fullscreen: *const fn (w: GtkWindow) callconv(.c) void = undefined;
 pub var gtk_window_unfullscreen: *const fn (w: GtkWindow) callconv(.c) void = undefined;
 pub var gtk_window_set_geometry_hints: *const fn (w: GtkWindow, geom: ?*anyopaque, hints: ?*anyopaque, mask: c_int) callconv(.c) void = undefined;
+pub var gtk_clipboard_get: *const fn (selection: gpointer) callconv(.c) ?GtkClipboard = undefined;
+pub var gtk_clipboard_wait_for_text: *const fn (cb: GtkClipboard) callconv(.c) ?[*:0]u8 = undefined;
+pub var gtk_clipboard_set_text: *const fn (cb: GtkClipboard, text: [*:0]const u8, len: gint) callconv(.c) void = undefined;
+pub var gtk_clipboard_store: *const fn (cb: GtkClipboard) callconv(.c) gboolean = undefined;
+pub var gtk_file_chooser_dialog_new: *const fn (
+    title: [*:0]const u8,
+    parent: ?GtkWindow,
+    action: c_int,
+    first_button: [*:0]const u8,
+    ...,
+) callconv(.c) ?GtkFileChooserDialog = undefined;
+pub var gtk_file_chooser_set_select_multiple: *const fn (d: GtkFileChooserDialog, v: gboolean) callconv(.c) void = undefined;
+pub var gtk_file_chooser_set_current_name: *const fn (d: GtkFileChooserDialog, name: [*:0]const u8) callconv(.c) void = undefined;
+pub var gtk_file_chooser_get_filename: *const fn (d: GtkFileChooserDialog) callconv(.c) ?[*:0]u8 = undefined;
+pub var gtk_file_chooser_get_filenames: *const fn (d: GtkFileChooserDialog) callconv(.c) ?[*:null]?[*:0]u8 = undefined;
+pub var gtk_file_chooser_add_filter: *const fn (d: GtkFileChooserDialog, f: ?GtkFileFilter) callconv(.c) void = undefined;
+pub var gtk_file_filter_new: *const fn () callconv(.c) ?GtkFileFilter = undefined;
+pub var gtk_file_filter_set_name: *const fn (f: GtkFileFilter, name: [*:0]const u8) callconv(.c) void = undefined;
+pub var gtk_file_filter_add_pattern: *const fn (f: GtkFileFilter, pattern: [*:0]const u8) callconv(.c) void = undefined;
+pub var gtk_dialog_run: *const fn (d: GtkDialog) callconv(.c) gint = undefined;
+pub var gtk_dialog_add_button: *const fn (d: GtkDialog, label: [*:0]const u8, id: gint) callconv(.c) ?*anyopaque = undefined;
+pub var gtk_message_dialog_new: *const fn (
+    parent: ?GtkWindow,
+    flags: c_int,
+    kind: c_int,
+    buttons: c_int,
+    first: [*:0]const u8,
+    ...,
+) callconv(.c) ?GtkDialog = undefined;
+pub var gtk_show_uri_on_window: *const fn (
+    parent: ?GtkWindow,
+    uri: [*:0]const u8,
+    timestamp: u32,
+    err: ?*GErrorFull,
+) callconv(.c) gboolean = undefined;
+pub var g_spawn_async: *const fn (
+    dir: ?[*:0]const u8,
+    argv: [*]const [*:0]const u8,
+    envp: ?[*]const [*:0]const u8,
+    flags: c_int,
+    child_setup: ?*const anyopaque,
+    user_data: ?gpointer,
+    child_pid: ?*c_int,
+) callconv(.c) gboolean = undefined;
+
 pub var gtk_window_set_default_icon_name: *const fn (name: [*:0]const u8) callconv(.c) void = undefined;
 pub var gtk_window_set_type_hint: *const fn (w: GtkWindow, hint: c_int) callconv(.c) void = undefined;
 pub var gtk_window_present: *const fn (w: GtkWindow) callconv(.c) void = undefined;
@@ -190,9 +253,6 @@ pub var gtk_container_remove: *const fn (c: GtkContainer, child: GtkWidget) call
 pub var gtk_window_set_default_icon_from_file: *const fn (f: [*:0]const u8, err: *?*GError) callconv(.c) gboolean = undefined;
 pub var gtk_settings_get_default: *const fn () callconv(.c) ?gpointer = undefined;
 pub var gtk_style_context_new: *const fn () callconv(.c) gpointer = undefined;
-pub var gtk_clipboard_get: *const fn (sel: gpointer) callconv(.c) gpointer = undefined;
-pub var gtk_clipboard_set_text: *const fn (cb: gpointer, text: [*:0]const u8, len: gint) callconv(.c) void = undefined;
-pub var gtk_clipboard_wait_for_text: *const fn (cb: gpointer) callconv(.c) ?[*:0]u8 = undefined;
 pub var gtk_main: *const fn () callconv(.c) void = undefined;
 pub var gtk_main_quit: *const fn () callconv(.c) void = undefined;
 pub var gtk_main_iteration_do: *const fn (blocking: gboolean) callconv(.c) gboolean = undefined;
@@ -388,6 +448,7 @@ const glib_syms = .{
     .{ "g_main_loop_unref", "g_main_loop_unref" },
     .{ "g_error_free", "g_error_free" },
     .{ "g_free", "g_free" },
+    .{ "g_spawn_async", "g_spawn_async" },
     .{ "g_bytes_new_static", "g_bytes_new_static" },
     .{ "g_bytes_unref", "g_bytes_unref" },
     .{ "g_quark_from_static_string", "g_quark_from_static_string" },
@@ -465,6 +526,23 @@ const gtk_syms = .{
     .{ "gtk_window_unfullscreen", "gtk_window_unfullscreen" },
     .{ "gtk_window_set_geometry_hints", "gtk_window_set_geometry_hints" },
     .{ "gtk_window_set_default_icon_name", "gtk_window_set_default_icon_name" },
+    .{ "gtk_clipboard_get", "gtk_clipboard_get" },
+    .{ "gtk_clipboard_wait_for_text", "gtk_clipboard_wait_for_text" },
+    .{ "gtk_clipboard_set_text", "gtk_clipboard_set_text" },
+    .{ "gtk_clipboard_store", "gtk_clipboard_store" },
+    .{ "gtk_file_chooser_dialog_new", "gtk_file_chooser_dialog_new" },
+    .{ "gtk_file_chooser_set_select_multiple", "gtk_file_chooser_set_select_multiple" },
+    .{ "gtk_file_chooser_set_current_name", "gtk_file_chooser_set_current_name" },
+    .{ "gtk_file_chooser_get_filename", "gtk_file_chooser_get_filename" },
+    .{ "gtk_file_chooser_get_filenames", "gtk_file_chooser_get_filenames" },
+    .{ "gtk_file_chooser_add_filter", "gtk_file_chooser_add_filter" },
+    .{ "gtk_file_filter_new", "gtk_file_filter_new" },
+    .{ "gtk_file_filter_set_name", "gtk_file_filter_set_name" },
+    .{ "gtk_file_filter_add_pattern", "gtk_file_filter_add_pattern" },
+    .{ "gtk_dialog_run", "gtk_dialog_run" },
+    .{ "gtk_dialog_add_button", "gtk_dialog_add_button" },
+    .{ "gtk_message_dialog_new", "gtk_message_dialog_new" },
+    .{ "gtk_show_uri_on_window", "gtk_show_uri_on_window" },
     .{ "gtk_window_set_type_hint", "gtk_window_set_type_hint" },
     .{ "gtk_window_present", "gtk_window_present" },
     .{ "gtk_widget_show", "gtk_widget_show" },
@@ -478,9 +556,6 @@ const gtk_syms = .{
     .{ "gtk_box_new", "gtk_box_new" },
     .{ "gtk_container_add", "gtk_container_add" },
     .{ "gtk_container_remove", "gtk_container_remove" },
-    .{ "gtk_clipboard_get", "gtk_clipboard_get" },
-    .{ "gtk_clipboard_set_text", "gtk_clipboard_set_text" },
-    .{ "gtk_clipboard_wait_for_text", "gtk_clipboard_wait_for_text" },
     .{ "gtk_events_pending", "gtk_events_pending" },
     .{ "gtk_main", "gtk_main" },
     .{ "gtk_main_iteration_do", "gtk_main_iteration_do" },

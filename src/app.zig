@@ -37,6 +37,7 @@ const alloc = @import("allocator.zig");
 const paths_mod = @import("utils/paths.zig");
 const env = @import("utils/env.zig");
 const ipc_mod = @import("ipc/ipc.zig");
+const desktop_mod = @import("platform/desktop.zig");
 const json = @import("json.zig");
 const window_mod = @import("window.zig");
 
@@ -69,6 +70,10 @@ pub const AppOptions = struct {
 };
 
 /// A file in the application's bundled frontend.
+/// Where a window points when the app embeds a frontend and the window does not
+/// name a URL of its own.
+pub const default_frontend_url = "myzig://app/index.html";
+
 pub const FrontendFile = struct {
     /// Path relative to the frontend root, e.g. `"index.html"`.
     path: []const u8,
@@ -136,6 +141,9 @@ pub const App = struct {
     quit_cancelled: bool = false,
     /// The typed IPC layer: services, subscriptions and in-flight cancels.
     ipc: ipc_mod.Exchange,
+    /// Storage for the built-in service definitions. The registry keeps
+    /// pointers into this array, so it must live as long as the app.
+    builtin_methods: [ipc_mod.builtin.count]ipc_mod.service.Method,
 
     const OwnedOptions = struct {
         name: []const u8,
@@ -230,6 +238,7 @@ pub const App = struct {
             .be = .{ .ctx = undefined, .vtable = &backend_vtable },
             .be_storage = newBackend(),
             .ipc = ipc_mod.Exchange.init(allocator),
+            .builtin_methods = undefined,
             .options = .{
                 .name = app_name,
                 .app_id = app_id,
@@ -243,6 +252,17 @@ pub const App = struct {
         };
         self.queue.wake = wakeLoop;
         self.queue.wake_ctx = &self;
+
+        // The built-in services make the bridge's `clipboard`, `dialog`,
+        // `notify` and `openExternal` work without the application binding
+        // anything. Registration happens here, after `self` exists, because
+        // every handler receives the app as its context.
+        ipc_mod.builtin.fill(&self.builtin_methods, &self);
+        _ = self.bindAll(&self.builtin_methods) catch |e| {
+            // A duplicate here is a framework bug, not a user error, so it is
+            // reported and the app still starts.
+            log.err("built-in service registration failed: {s}", .{@errorName(e)});
+        };
         return self;
     }
 
@@ -302,6 +322,12 @@ pub const App = struct {
             .ctx = self,
             .eval = evalForIpc,
         });
+
+        // `init` returns the app by value, so it lands in a new location when
+        // the caller stores it. Every built-in handler holds the address it was
+        // created with, which would be the discarded copy; rebinding here
+        // points them at the real app.
+        ipc_mod.builtin.setApp(self);
     }
 
     fn evalForIpc(ctx: ?*anyopaque, window: u32, code: []const u8) bool {
@@ -324,6 +350,119 @@ pub const App = struct {
     pub fn bindAll(self: *App, methods: []const ipc_mod.service.Method) !void {
         try self.ipc.registry.addAll(methods);
     }
+
+    // -------------------------------------------------------- desktop APIs
+
+    /// Reads the clipboard into a caller-provided buffer. Null when the
+    /// clipboard is empty or holds something other than text.
+    pub fn readClipboard(self: *App, buf: []u8) ?[]const u8 {
+        if (self.phase != .running) return null;
+        return desktop_backend.readClipboard(buf);
+    }
+
+    /// Puts text on the clipboard. Returns false when the platform refused.
+    pub fn writeClipboard(self: *App, text: []const u8) bool {
+        if (self.phase != .running) return false;
+        return desktop_backend.writeClipboard(text);
+    }
+
+    /// Shows a file dialog. Blocks the main thread until the user answers,
+    /// which is the behaviour a page's `await` expects.
+    pub fn fileDialog(
+        self: *App,
+        opts: desktop_mod.FileDialogOptions,
+        out: *const desktop_mod.PathBuffer,
+    ) desktop_mod.FileDialogError!desktop_mod.FileChoice {
+        if (self.phase != .running) return error.NotSupported;
+        return desktop_backend.fileDialog(opts, out);
+    }
+
+    /// Shows a message box and returns the index of the button pressed, or null
+    /// when it was dismissed.
+    pub fn messageBox(self: *App, opts: desktop_mod.MessageOptions) ?usize {
+        if (self.phase != .running) return null;
+        return desktop_backend.messageBox(opts);
+    }
+
+    /// Shows a notification. Returns false when the desktop refused it.
+    pub fn notify(self: *App, opts: desktop_mod.NotificationOptions) bool {
+        if (self.phase != .running) return false;
+        return desktop_backend.notify(opts);
+    }
+
+    /// Opens a URL in the user's browser.
+    pub fn openExternal(self: *App, url: []const u8) bool {
+        if (self.phase != .running) return false;
+        return desktop_backend.openExternal(url);
+    }
+
+    /// A view over the desktops the selected backend provides.
+    fn desktopOf(self: *App) desktop_mod.Desktop {
+        if (self.phase != .running) {
+            return .{ .ctx = null, .vtable = &inert_desktop };
+        }
+        return switch (backend.current) {
+            .linux => .{ .ctx = null, .vtable = &@import("platform/linux/desktop.zig").vtable() },
+            else => .{ .ctx = null, .vtable = &inert_desktop },
+        };
+    }
+
+    /// Every desktop method says "not supported", so a call before `run` or on
+    /// a backend without the feature has one predictable behaviour.
+    const inert_desktop = desktop_mod.Desktop.VTable{
+        .read_clipboard = struct {
+            fn f(_: ?*anyopaque, _: []u8) ?[]const u8 {
+                return null;
+            }
+        }.f,
+        .write_clipboard = struct {
+            fn f(_: ?*anyopaque, _: []const u8) bool {
+                return false;
+            }
+        }.f,
+        .file_dialog = struct {
+            fn f(_: ?*anyopaque, _: desktop_mod.FileDialogOptions, _: *const desktop_mod.PathBuffer) desktop_mod.FileDialogError!desktop_mod.FileChoice {
+                return error.NotSupported;
+            }
+        }.f,
+        .message_box = struct {
+            fn f(_: ?*anyopaque, _: desktop_mod.MessageOptions) ?usize {
+                return null;
+            }
+        }.f,
+        .notify = struct {
+            fn f(_: ?*anyopaque, _: desktop_mod.NotificationOptions) bool {
+                return false;
+            }
+        }.f,
+        .open_external = struct {
+            fn f(_: ?*anyopaque, _: []const u8) bool {
+                return false;
+            }
+        }.f,
+        .show_in_folder = struct {
+            fn f(_: ?*anyopaque, _: []const u8) bool {
+                return false;
+            }
+        }.f,
+        .theme = struct {
+            fn f(_: ?*anyopaque) desktop_mod.Theme {
+                return .light;
+            }
+        }.f,
+    };
+
+    /// The vtable for this build, held in a named constant so its address is
+    /// stable: taking the address of a temporary is what made every desktop
+    /// call fall through to the inert table.
+    const desktop_vtable: desktop_mod.Desktop.VTable = switch (backend.current) {
+        .linux => @import("platform/linux/desktop.zig").vtable(),
+        else => App.inert_desktop,
+    };
+    const desktop_backend: desktop_mod.Desktop = .{
+        .ctx = null,
+        .vtable = &desktop_vtable,
+    };
 
     /// Sends `payload` to every window subscribed to `name`. Returns the number
     /// of windows addressed.
@@ -496,7 +635,15 @@ pub const App = struct {
         errdefer state.deinit();
 
         state.title = try state.intern(if (opts.title.len > 0) opts.title else self.options.name);
-        state.url = try state.intern(opts.url);
+        // A web or hybrid window with no explicit URL serves the frontend's
+        // `index.html`. Without this the backend is asked to make a window with
+        // nothing to show, which leaves it empty.
+        state.url = try state.intern(if (opts.url.len > 0)
+            opts.url
+        else if (self.options.frontend.len > 0 and opts.view == null)
+            default_frontend_url
+        else
+            "");
         state.state_key = try state.intern(opts.state_key);
         state.view = opts.view;
         state.view_context = opts.view_context;
@@ -604,6 +751,15 @@ pub const App = struct {
         return st;
     }
 
+    /// Resolves a raw backend id back to its current handle. Used by built-in
+    /// services, which only know the id of the window that called them.
+    pub fn windowById(self: *const App, id: u32) ?Window {
+        if (id == 0) return null;
+        const st = (self.windows[id % max_windows] orelse return null);
+        if (st.handle.id != id) return null;
+        return st.handle;
+    }
+
     pub fn windowValid(self: *const App, h: Window) bool {
         if (h.id == 0) return false;
         const slot = h.id % max_windows;
@@ -613,6 +769,75 @@ pub const App = struct {
 
     /// Closes a window, running its close listeners (which may not cancel;
     /// use `onCloseRequested` for that).
+    // --------------------------------------------------- window operations
+
+    /// Shows or hides a window. A hidden window keeps its web view and state.
+    pub fn showWindow(self: *App, h: Window, visible: bool) void {
+        if (!self.windowValid(h)) return;
+        self.be.vtable.show_window(self.be.ctx, h.id, visible);
+    }
+
+    /// Raises and focuses a window.
+    pub fn focusWindow(self: *App, h: Window) void {
+        if (!self.windowValid(h)) return;
+        self.be.vtable.focus_window(self.be.ctx, h.id);
+    }
+
+    /// Changes the window title.
+    pub fn setWindowTitle(self: *App, h: Window, title: []const u8) void {
+        if (!self.windowValid(h)) return;
+        self.be.vtable.set_title(self.be.ctx, h.id, title);
+    }
+
+    /// Moves and resizes a window in DIPs.
+    pub fn setWindowBounds(self: *App, h: Window, r: backend.Rect) !void {
+        if (!self.windowValid(h)) return error.InvalidWindow;
+        try self.be.vtable.set_bounds(self.be.ctx, h.id, r);
+    }
+
+    /// The window's current frame in DIPs, or null when it is gone.
+    pub fn windowBounds(self: *App, h: Window) ?backend.Rect {
+        if (!self.windowValid(h)) return null;
+        return self.be.vtable.get_bounds(self.be.ctx, h.id);
+    }
+
+    /// Applies a window state: normal, minimised, maximised or fullscreen.
+    pub fn setWindowState(self: *App, h: Window, state: events.WindowState) !void {
+        if (!self.windowValid(h)) return error.InvalidWindow;
+        try self.be.vtable.set_state(self.be.ctx, h.id, state);
+    }
+
+    /// Keeps a window above the others.
+    pub fn setWindowAlwaysOnTop(self: *App, h: Window, on: bool) void {
+        if (!self.windowValid(h)) return;
+        self.be.vtable.set_always_on_top(self.be.ctx, h.id, on);
+    }
+
+    /// Enters or leaves fullscreen.
+    pub fn setWindowFullscreen(self: *App, h: Window, on: bool) !void {
+        if (!self.windowValid(h)) return error.InvalidWindow;
+        try self.be.vtable.set_fullscreen(self.be.ctx, h.id, on);
+    }
+
+    /// Loads a URL in the window's web view.
+    pub fn loadWindowUrl(self: *App, h: Window, url: []const u8) !void {
+        if (!self.windowValid(h)) return error.InvalidWindow;
+        try self.be.vtable.load_url(self.be.ctx, h.id, url);
+    }
+
+    /// Evaluates JavaScript in the window's page. The result is discarded;
+    /// use a service when the page needs an answer.
+    pub fn evalInWindow(self: *App, h: Window, code: []const u8) !void {
+        if (!self.windowValid(h)) return error.InvalidWindow;
+        try self.be.vtable.eval_js(self.be.ctx, h.id, code);
+    }
+
+    /// Opens the developer tools for a window.
+    pub fn openDevtools(self: *App, h: Window) void {
+        if (!self.windowValid(h)) return;
+        self.be.vtable.open_devtools(self.be.ctx, h.id);
+    }
+
     pub fn closeWindow(self: *App, h: Window) void {
         const st = self.windowState(h) orelse return;
         if (st.on_close) |f| f(h, st.on_close_ctx);

@@ -198,9 +198,12 @@ pub const Exchange = struct {
                     self.appendError(out, call.id, .cancelled, "the call was cancelled") catch {};
                     return true;
                 }
-                const result = self.registry.call(call.method, decode.Args.init(call.args));
+                var call_args = decode.Args.init(call.args);
+                call_args.sender = window;
+                const result = self.registry.call(call.method, call_args);
                 switch (result) {
                     .ok => |v| self.appendOk(out, call.id, v) catch return false,
+                    .ok_raw => |text| self.appendOkRaw(out, call.id, text) catch return false,
                     .err => |f| self.appendError(out, call.id, f.code, f.message) catch return false,
                 }
                 // The page cancelled while the handler ran: the reply is
@@ -220,6 +223,16 @@ pub const Exchange = struct {
         try self.appendU32(out, id);
         try out.appendSlice(self.allocator, ",\"v\":");
         try value.encode(self.allocator, out);
+        try out.append(self.allocator, '}');
+    }
+
+    fn appendOkRaw(self: *Exchange, out: *std.ArrayList(u8), id: u32, text: []const u8) !void {
+        if (out.items.len == 0) try out.append(self.allocator, '[');
+        if (out.items.len > 1) try out.append(self.allocator, ',');
+        try out.appendSlice(self.allocator, "{\"t\":\"ok\",\"id\":");
+        try self.appendU32(out, id);
+        try out.appendSlice(self.allocator, ",\"v\":");
+        try out.appendSlice(self.allocator, text);
         try out.append(self.allocator, '}');
     }
 

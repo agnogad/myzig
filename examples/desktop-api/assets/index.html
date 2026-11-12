@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Desktop API</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --fg: #1c1c1e;
+    --dim: #6b6b70;
+    --bg: #f6f6f8;
+    --card: #ffffff;
+    --line: #dcdce1;
+    --accent: #2f6fed;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fg: #ededf0;
+      --dim: #9a9aa2;
+      --bg: #17171a;
+      --card: #202024;
+      --line: #33333a;
+      --accent: #6f9dff;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 20px;
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: var(--fg);
+    background: var(--bg);
+  }
+  h1 { margin: 0 0 4px; font-size: 17px; font-weight: 600; }
+  p.lead { margin: 0 0 18px; color: var(--dim); }
+  section {
+    margin-bottom: 14px;
+    padding: 14px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--card);
+  }
+  h2 {
+    margin: 0 0 10px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  button {
+    padding: 7px 13px;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    background: transparent;
+    color: var(--fg);
+    font: inherit;
+    cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button:active { transform: translateY(1px); }
+  #clip {
+    flex: 1 1 200px;
+    min-width: 120px;
+    padding: 7px 10px;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    background: var(--bg);
+    color: var(--fg);
+    font: inherit;
+  }
+  #log {
+    margin: 0;
+    max-height: 140px;
+    overflow: auto;
+    font: 12px/1.6 ui-monospace, "SF Mono", Menlo, monospace;
+    color: var(--dim);
+    white-space: pre-wrap;
+  }
+  #log b { color: var(--fg); font-weight: 600; }
+</style>
+</head>
+<body>
+  <h1>Desktop API</h1>
+  <p class="lead">Every control below calls a built-in MyZig service.</p>
+
+  <section>
+    <h2>Clipboard</h2>
+    <div class="row">
+      <input id="clip" value="copied from MyZig" aria-label="Text to copy">
+      <button id="copy">Copy</button>
+      <button id="paste">Paste</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Dialogs</h2>
+    <div class="row">
+      <button id="open">Open file</button>
+      <button id="save">Save as</button>
+      <button id="ask">Ask</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>System</h2>
+    <div class="row">
+      <button id="notify">Notify</button>
+      <button id="browse">Open a URL</button>
+      <button id="info">App info</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Log</h2>
+    <pre id="log">Waiting for the bridge…</pre>
+  </section>
+
+  <script src="app.js"></script>
+</body>
+</html>

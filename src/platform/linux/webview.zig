@@ -175,6 +175,9 @@ pub fn createFor(id: u32, parent: ffi.GtkWindow, opts: backend.WindowOptions) Er
         ffi.webkit_settings_set_enable_javascript(st, ffi.TRUE);
         ffi.webkit_settings_set_enable_developer_extras(st, ffi.TRUE);
         ffi.webkit_settings_set_enable_smooth_scrolling(st, ffi.TRUE);
+        // A page's console output is the developer's only window into the
+        // JavaScript side, so it goes to the terminal rather than nowhere.
+        ffi.webkit_settings_set_enable_write_console_messages_to_stdout(st, ffi.TRUE);
         ffi.webkit_settings_set_hardware_acceleration_policy(st, ffi.WEBKIT_HARDWARE_ACCELERATION_POLICY_ON_DEMAND);
     }
 
@@ -287,21 +290,14 @@ fn onUriChanged(id: u32) void {
 }
 
 fn onMessage(id: u32, value: *anyopaque) void {
-    const v = views.getPtr(id) orelse {
-        log.debug("ipc: message for unknown window {d}", .{id});
-        return;
-    };
+    const v = views.getPtr(id) orelse return;
     _ = v;
-    log.debug("ipc: message arrived on window {d}", .{id});
     // The message is a JSCValue holding the string the bridge posted. WebKitGTK
     // hands it as the signal's JSCValue argument; read it as a UTF-8 string
     // through JavaScriptCore, which WebKitGTK links.
     const s = sink orelse return;
     var buf: [1 << 16]u8 = undefined;
-    const text = readMessage(&buf, value) orelse {
-        log.debug("ipc: could not read the message string (is JavaScriptCore loaded?)", .{});
-        return;
-    };
+    const text = readMessage(&buf, value) orelse return;
     s.webMessage(id, text);
 }
 
@@ -312,24 +308,15 @@ fn onMessage(id: u32, value: *anyopaque) void {
 /// first. The result is transferred to the handler and released here.
 fn readMessage(buf: []u8, result: *anyopaque) ?[]const u8 {
     defer ffi.webkit_javascript_result_unref(result);
-    const value = ffi.webkit_javascript_result_get_js_value(result) orelse {
-        log.debug("ipc: the javascript result holds no value", .{});
-        return null;
-    };
+    const value = ffi.webkit_javascript_result_get_js_value(result) orelse return null;
     return jscString(buf, value);
 }
 
 /// Reads a JSCValue string. `jsc_value_to_string` returns UTF-8 owned by
 /// JavaScriptCore; `g_free` releases it.
 fn jscString(buf: []u8, value: *anyopaque) ?[]const u8 {
-    const jsc = js_core orelse {
-        log.debug("ipc: JavaScriptCore not loaded at message time", .{});
-        return null;
-    };
-    const raw = jsc.to_string(value) orelse {
-        log.debug("ipc: jsc_value_to_string returned null", .{});
-        return null;
-    };
+    const jsc = js_core orelse return null;
+    const raw = jsc.to_string(value) orelse return null;
     defer ffi.g_free(@ptrCast(raw));
     const n = std.mem.len(raw);
     if (n > buf.len) return null;

@@ -53,6 +53,7 @@ const std = @import("std");
 pub const App = @import("app.zig").App;
 pub const AppOptions = @import("app.zig").AppOptions;
 pub const FrontendFile = @import("app.zig").FrontendFile;
+pub const default_frontend_url = @import("app.zig").default_frontend_url;
 pub const Phase = @import("app.zig").Phase;
 pub const Window = @import("window.zig").Window;
 pub const WindowOptions = @import("window.zig").WindowOptions;
@@ -76,6 +77,7 @@ pub const errors = @import("errors.zig");
 pub const log = @import("log.zig");
 pub const loop = @import("loop.zig");
 pub const paths = @import("utils/paths.zig");
+pub const env = @import("utils/env.zig");
 pub const version = @import("version.zig").version_string;
 
 // ------------------------------------------------------------ convenience
