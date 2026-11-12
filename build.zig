@@ -36,6 +36,7 @@ pub fn build(b: *std.Build) void {
         .{ .name = "hybrid", .path = "examples/hybrid/main.zig", .desc = "Native chrome around a web view" },
         .{ .name = "desktop-api", .path = "examples/desktop-api/main.zig", .desc = "Clipboard, dialogs, notifications, tray" },
         .{ .name = "menus", .path = "examples/menus/main.zig", .desc = "Menu bar with accelerators" },
+        .{ .name = "native-ui", .path = "examples/native-ui/main.zig", .desc = "A window drawn by MyZig itself: no web engine" },
         .{ .name = "tray", .path = "examples/tray/main.zig", .desc = "Tray icon and global shortcut" },
     };
 

@@ -15,7 +15,7 @@ here only once it compiles, has tests, and has been run.
 | 1 | Linux backend: GTK 3 windows, WebKitGTK pages, `myzig://` scheme, bridge injection | **Done** |
 | 2 | Typed IPC: service binding, events, TypeScript client generation | **Done** |
 | 3 | Desktop APIs: clipboard, dialogs, notifications, tray, menus, shortcuts | **Done** |
-| 4 | Native UI toolkit: layout, GPU rendering, accessibility | Not started |
+| 4 | Native UI toolkit: layout, rendering, accessibility | **In progress** (layout, rasteriser, input done; accessibility pending) |
 | 5 | Windows backend: Win32 + WebView2 | Not started |
 | 6 | macOS backend: AppKit + WKWebView | Not started |
 | 7 | Ecosystem: CLI, plugins, packaging, auto-update | Not started |
@@ -69,7 +69,44 @@ source file and in the example that exercises it:
   daemon gets `false`, not a silent drop. Not yet verified on a real session.
 * Global shortcuts are X11 only. Wayland forbids global grabs by design, so
   `registerShortcut` returns `error.NotSupported` there.
-* Native UI rendering (milestone 4).
+## Milestone 4: the native UI toolkit
+
+A window can now be drawn entirely by MyZig, with no page and no WebKit.
+
+* `src/ui/geometry.zig` — rectangles, edge insets and colours, with
+  source-over blending. Integer coordinates only: adding `f32` sizes down a tree
+  drifts, and a row of boxes that should line up ends up a pixel off.
+* `src/ui/layout.zig` — a flex-style engine. A box lays its children out in a
+  row or a column with padding, spacing, fixed or content-derived sizes and a
+  grow factor. Measured first, arranged second. Leftover space is divided by
+  grow factor and the rounding remainder goes to the earliest children, so the
+  frames add up to the parent exactly.
+* `src/ui/canvas.zig` — a display list (`fill`, `text`) plus a software
+  rasteriser, and `src/ui/font8x8.zig`, a bitmap font for ASCII 32–126. A
+  bitmap font needs no font-file parser and no shaping, so text appears with no
+  dependency at all.
+* `src/platform/linux/surface.zig` — the Linux native window: a
+  `GtkDrawingArea` inside a `GtkEventBox`, rasterised into an RGBA buffer and
+  blitted through cairo. `cairo` is loaded at runtime like GTK, so a
+  page-only application never maps it.
+
+**Verified on screen**, not just compiled: `native-ui` opens a 720×260 window
+with a blue header, a counter and three buttons. Clicking `+1` twice and then
+`Theme` printed `clicks = 2, dark = true`, and the next screenshot showed a
+dark background and a highlighted Theme button. No web engine was loaded.
+
+Three real bugs came out of running it:
+
+1. **Text was garbage** because the builder stored the caller's slice. A draw
+   function formats a number into a stack buffer, the frame is rasterised after
+   it returns, and the buffer was already gone. The builder now copies text.
+2. **Red and blue were swapped** because cairo's `ARGB32` is BGRA in memory. The
+   header came out orange until the bytes were swapped before the blit.
+3. **Clicks never arrived** because a `GtkDrawingArea` has no `GdkWindow` of its
+   own. Wrapping it in a `GtkEventBox` gave it one.
+
+Still open in this milestone: accessibility (exposing the tree to AT-SPI),
+GPU rendering, and text beyond ASCII.
 * Native UI: `counter-native` opens a window and prints that the toolkit is not
   there yet (milestone 4).
 * The Windows and macOS backends return `NotSupported` from every entry point.

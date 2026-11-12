@@ -154,6 +154,9 @@ fn init(ctx: *anyopaque, app: *app_mod.App) errors.InitError!void {
 
     // The dispatch layer turns the framework's wake calls into idle callbacks.
     windows.init(app.gpa, app.sink());
+    // The native renderer shares the window registry's allocator and sink, so a
+    // surface can report its size and input without another wiring step.
+    @import("surface.zig").init(app.gpa, app.sink());
     webview.init(app.gpa, app.sink(), app);
     self.dispatch_source = dispatch.install(app);
 

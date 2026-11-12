@@ -102,6 +102,7 @@ const abi = if (@import("builtin").os.tag == .windows) std.DynLib else std.c;
 var lib_glib: ?std.DynLib = null;
 var lib_gobject: ?std.DynLib = null;
 var lib_gtk: ?std.DynLib = null;
+var lib_cairo: ?std.DynLib = null;
 var lib_gio: ?std.DynLib = null;
 var lib_gdk: ?std.DynLib = null;
 var lib_webkit: ?std.DynLib = null;
@@ -282,6 +283,33 @@ pub var gtk_widget_queue_draw: *const fn (w: GtkWidget) callconv(.c) void = unde
 pub var gtk_widget_set_can_focus: *const fn (w: GtkWidget, v: gboolean) callconv(.c) void = undefined;
 pub var gtk_widget_add_events: *const fn (w: GtkWidget, ev: gint) callconv(.c) void = undefined;
 pub var gtk_box_new: *const fn (orientation: c_int, spacing: gint) callconv(.c) ?GtkBox = undefined;
+
+// ------------------------------------------------------- native drawing area
+// A native window paints into a `GtkDrawingArea`: GDK hands the draw signal a
+// cairo context, and the toolkit's software rasteriser blits its buffer into
+// it. That is the one piece of GTK the native renderer needs.
+pub const GtkDrawingArea = *anyopaque;
+pub const GtkAllocation = extern struct { x: c_int, y: c_int, width: c_int, height: c_int };
+pub const DrawSignal = *const fn (widget: GtkWidget, cr: gpointer, user_data: ?*anyopaque) callconv(.c) gboolean;
+pub const SizeSignal = *const fn (widget: GtkWidget, alloc: *GtkAllocation, user_data: ?*anyopaque) callconv(.c) void;
+
+pub var gtk_drawing_area_new: *const fn () callconv(.c) ?GtkDrawingArea = undefined;
+pub var gtk_event_box_new: *const fn () callconv(.c) ?GtkWidget = undefined;
+pub var gtk_widget_set_double_buffered: *const fn (w: GtkWidget, v: gboolean) callconv(.c) void = undefined;
+pub var gtk_widget_set_size_request: *const fn (w: GtkWidget, width: gint, height: gint) callconv(.c) void = undefined;
+pub var gtk_widget_get_pointer: *const fn (w: GtkWidget, x: ?*f64, y: ?*f64) callconv(.c) void = undefined;
+pub var gtk_widget_get_window: *const fn (w: GtkWidget) callconv(.c) ?gpointer = undefined;
+
+// cairo: only what is needed to push an RGBA32 buffer to the drawing area.
+pub const CairoImageSurface = *anyopaque;
+pub var cairo_image_surface_create_for_data: *const fn (data: [*]u8, format: c_int, width: c_int, height: c_int, stride: c_int) callconv(.c) ?CairoImageSurface = undefined;
+pub var cairo_create: *const fn (target: CairoImageSurface) callconv(.c) ?gpointer = undefined;
+pub var cairo_set_source_surface: *const fn (cr: gpointer, surface: CairoImageSurface, x: f64, y: f64) callconv(.c) void = undefined;
+pub var cairo_paint: *const fn (cr: gpointer) callconv(.c) void = undefined;
+pub var cairo_destroy: *const fn (cr: gpointer) callconv(.c) void = undefined;
+pub var cairo_surface_destroy: *const fn (surface: CairoImageSurface) callconv(.c) void = undefined;
+pub var cairo_surface_flush: *const fn (surface: CairoImageSurface) callconv(.c) void = undefined;
+pub var cairo_scale: *const fn (cr: gpointer, sx: f64, sy: f64) callconv(.c) void = undefined;
 pub var gtk_container_add: *const fn (c: GtkContainer, child: GtkWidget) callconv(.c) void = undefined;
 pub var gtk_widget_get_parent: *const fn (w: GtkWidget) callconv(.c) ?GtkWidget = undefined;
 pub var gtk_container_remove: *const fn (c: GtkContainer, child: GtkWidget) callconv(.c) void = undefined;
@@ -402,6 +430,21 @@ pub fn load() errors.InitError!void {
     loaded = true;
 }
 
+/// Resolves cairo. Only a native window that paints itself needs it, so a
+/// page-only application never maps the library.
+var cairo_loaded = false;
+pub fn loadCairo() errors.InitError!void {
+    if (cairo_loaded) return;
+    var lib = openLib(&.{"libcairo.so.2"}) orelse {
+        log.err("cairo is not installed; the native renderer needs libcairo2", .{});
+        return errors.InitError.LibraryMissing;
+    };
+    errdefer lib.close();
+    try bindAll(&lib, cairo_syms);
+    lib_cairo = lib;
+    cairo_loaded = true;
+}
+
 /// Resolves WebKitGTK. Called when the first page-showing window is created.
 pub fn loadWebKit() errors.InitError!void {
     if (webkit_loaded) return;
@@ -427,6 +470,7 @@ pub fn loadWebKit() errors.InitError!void {
 }
 
 pub fn unload() void {
+    if (lib_cairo) |*l| l.close();
     if (lib_webkit) |*l| l.close();
     if (lib_gtk) |*l| l.close();
     if (lib_gdk) |*l| l.close();
@@ -507,6 +551,17 @@ const gobject_syms = .{
 
 /// `libgio-2.0` provides the stream types. Kept apart from GLib so a missing
 /// GIO is reported as such.
+const cairo_syms = .{
+    .{ "cairo_image_surface_create_for_data", "cairo_image_surface_create_for_data" },
+    .{ "cairo_create", "cairo_create" },
+    .{ "cairo_set_source_surface", "cairo_set_source_surface" },
+    .{ "cairo_paint", "cairo_paint" },
+    .{ "cairo_destroy", "cairo_destroy" },
+    .{ "cairo_surface_destroy", "cairo_surface_destroy" },
+    .{ "cairo_surface_flush", "cairo_surface_flush" },
+    .{ "cairo_scale", "cairo_scale" },
+};
+
 const gio_syms = .{
     .{ "g_memory_input_stream_new_from_bytes", "g_memory_input_stream_new_from_bytes" },
 };
@@ -609,6 +664,11 @@ const gtk_syms = .{
     .{ "gtk_widget_set_can_focus", "gtk_widget_set_can_focus" },
     .{ "gtk_widget_add_events", "gtk_widget_add_events" },
     .{ "gtk_box_new", "gtk_box_new" },
+    .{ "gtk_drawing_area_new", "gtk_drawing_area_new" },
+    .{ "gtk_event_box_new", "gtk_event_box_new" },
+    .{ "gtk_widget_get_pointer", "gtk_widget_get_pointer" },
+    .{ "gtk_widget_set_size_request", "gtk_widget_set_size_request" },
+
     .{ "gtk_container_add", "gtk_container_add" },
     .{ "gtk_widget_get_parent", "gtk_widget_get_parent" },
     .{ "gtk_container_remove", "gtk_container_remove" },

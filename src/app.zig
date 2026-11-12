@@ -98,6 +98,12 @@ pub const Phase = enum {
 
 const max_windows = 512;
 
+/// A type-erased handler for a press on a native surface.
+const SurfaceInput = struct {
+    ctx: *anyopaque,
+    call: *const fn (ctx: *anyopaque, id: u32, x: f32, y: f32) bool,
+};
+
 /// The application.
 pub const App = struct {
     /// The base allocator MyZig allocates from.
@@ -118,6 +124,8 @@ pub const App = struct {
     be_storage: BackendStorage = undefined,
     /// Options, with strings duplicated into `arena`.
     options: OwnedOptions,
+    /// The native-surface press handler, when the application installed one.
+    surface_input: ?SurfaceInput = null,
     /// The lifecycle phase.
     phase: Phase = .initialised,
     /// Set once the main loop returned.
@@ -509,6 +517,30 @@ pub const App = struct {
 
     /// Attaches a menu bar to a window. The menu is copied into the window's
     /// state, so the caller does not need to keep it alive.
+    /// Installs the handler for pointer presses on native surfaces. `handler`
+    /// receives window id and position in DIPs.
+    pub fn setSurfaceInput(
+        self: *App,
+        comptime T: type,
+        ctx: *T,
+        handler: *const fn (state: *T, x: f32, y: f32) bool,
+    ) void {
+        const Thunk = struct {
+            state: *T,
+            handler: *const fn (state: *T, x: f32, y: f32) bool,
+
+            fn call(c: *anyopaque, id: u32, x: f32, y: f32) bool {
+                _ = id;
+                const self_: *@This() = @ptrCast(@alignCast(c));
+                return self_.handler(self_.state, x, y);
+            }
+        };
+
+        const thunk = self.arena.allocator().create(Thunk) catch return;
+        thunk.* = .{ .state = ctx, .handler = handler };
+        self.surface_input = .{ .ctx = @ptrCast(thunk), .call = Thunk.call };
+    }
+
     pub fn setMenu(self: *App, h: Window, m: menu_mod.Menu) !void {
         if (!self.windowValid(h)) return error.InvalidWindow;
         const st = self.windowState(h) orelse return error.InvalidWindow;
@@ -718,6 +750,8 @@ pub const App = struct {
         state.resizable = opts.resizable;
         state.closable = opts.closable;
 
+        state.native_draw = opts.native_draw;
+
         var secret_bytes: [8]u8 = undefined;
         env.secureRandom(&secret_bytes);
         state.secret = std.mem.readInt(u64, &secret_bytes, .little);
@@ -778,6 +812,7 @@ pub const App = struct {
             .parent = parent_id,
             .modal = opts.modal,
             .secret = state.secret,
+            .native_draw = self.windows[slot].?.native_draw,
         };
 
         if (self.phase == .running) {
@@ -1179,9 +1214,13 @@ pub const App = struct {
         st.scale = scale;
     }
     fn onSurfaceInput(ctx: *anyopaque, id: u32, input: events.Input) void {
-        _ = ctx;
-        _ = id;
-        _ = input;
+        const self = fromCtx(ctx);
+        // A native window's input goes to the application's own handler. The
+        // backend reports DIPs, so a handler compares against layout rectangles
+        // directly.
+        if (self.surface_input) |handler| {
+            if (input == .pointer_down) _ = handler.call(handler.ctx, id, input.pointer_down.x, input.pointer_down.y);
+        }
     }
     fn onSurfaceFrameRequested(ctx: *anyopaque, id: u32) void {
         _ = ctx;

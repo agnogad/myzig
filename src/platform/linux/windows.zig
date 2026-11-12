@@ -28,6 +28,7 @@ const app_mod = @import("../../app.zig");
 const log = @import("../../log.zig");
 const ffi = @import("ffi.zig");
 const webview = @import("webview.zig");
+const surface_mod = @import("surface.zig");
 
 pub const CreateError = error{ OutOfMemory, InvalidArgument, NotSupported };
 
@@ -37,6 +38,8 @@ pub const Entry = struct {
     window: ffi.GtkWindow,
     /// The web view, for a window showing a page.
     web: ?ffi.WebKitWebView = null,
+    /// The drawing area, for a window MyZig paints itself.
+    surface: ?*surface_mod.Surface = null,
     /// The container that holds the web view and any content.
     root: ?ffi.GtkWidget = null,
     /// The vertical box installed when the window has a menu bar.
@@ -291,10 +294,31 @@ pub fn create(app: *app_mod.App, id: u32, opts: backend.WindowOptions) CreateErr
         }
     }
 
+    // A native-only window paints into a drawing area of its own and never
+    // touches WebKit. A hybrid window gets the web view above plus the drawing
+    // area beneath it, so the two can be shown together.
+    var native_surface: ?*surface_mod.Surface = null;
+    if (opts.content == .native or opts.content == .hybrid) {
+        ffi.loadCairo() catch {
+            log.err("a native window needs cairo, which could not be loaded", .{});
+            ffi.gtk_widget_destroy(gtk_window);
+            return error.NotSupported;
+        };
+        native_surface = surface_mod.attach(id, @ptrCast(gtk_window), opts.width, opts.height) catch |e| {
+            ffi.gtk_widget_destroy(gtk_window);
+            return e;
+        };
+        if (opts.native_draw) |draw| {
+            native_surface.?.draw = draw.func;
+            native_surface.?.ctx = draw.ctx;
+        }
+    }
+
     try registry.put(gpa, id, .{
         .id = id,
         .window = gtk_window,
         .web = web,
+        .surface = native_surface,
         .width = opts.width,
         .height = opts.height,
         .x = opts.x orelse 0,
@@ -320,6 +344,7 @@ pub fn destroy(id: u32) void {
     const entry = registry.getPtr(id) orelse return;
     entry.destroying = true;
     ffi.gtk_widget_destroy(entry.window);
+    surface_mod.remove(id);
     _ = registry.remove(id);
     if (sink) |s| s.windowClosed(id);
 }

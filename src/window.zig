@@ -46,9 +46,13 @@ pub const WindowOptions = struct {
     /// protocol; `http://` and `https://` URLs load from the network in
     /// development and are blocked in production unless allowed.
     url: []const u8 = "",
-    /// A view function for a window showing native UI. Setting `viewport`
-    /// picks native UI; setting `url` picks a page.
+    /// A view function for a window showing native UI. Setting `view` picks
+    /// native UI; setting `url` picks a page.
     view: ?*const fn (ctx: *anyopaque) void = null,
+    /// How the native surface of this window is painted: called once per frame
+    /// with a `ui.canvas.Builder` to fill. Required for a native or hybrid
+    /// window; without it the surface stays blank.
+    native_draw: ?backend.NativeDraw = null,
     /// Opaque pointer passed to `view`, typically the app's state.
     view_context: ?*anyopaque = null,
     /// Whether the window shows both: a native surface behind, a web view in
@@ -127,6 +131,9 @@ pub const WindowState = struct {
     view: ?*const fn (ctx: *anyopaque) void = null,
     view_context: ?*anyopaque = null,
     kind: backend.ContentKind = .web,
+    /// How this window's native surface is painted, kept so the backend can
+    /// call it after the app has moved in memory.
+    native_draw: ?backend.NativeDraw = null,
     /// The menu bar, when the window has one. The description is a value, so
     /// the application may pass a temporary.
     menu: ?@import("menu.zig").Menu = null,

@@ -132,6 +132,32 @@ pub const WindowOptions = struct {
     /// Per-window random token; the webview bridge uses it to authenticate
     /// page -> Zig messages.
     secret: u64 = 0,
+
+    /// How a native window paints itself. The framework calls it once per frame
+    /// with a builder to fill; see `ui.canvas`.
+    native_draw: ?NativeDraw = null,
+};
+
+/// A drawing callback for a native window.
+///
+/// It receives the surface size in DIPs and the device scale, and appends
+/// drawing commands to `builder`. Keeping it type-erased here means
+/// `platform/backend.zig` never imports the UI toolkit and a backend that has
+/// no native support still compiles.
+pub const NativeDraw = struct {
+    /// The builder arrives as `*ui.canvas.Builder`, passed as a pointer to an
+    /// opaque value so this file does not depend on the toolkit.
+    func: *const fn (ctx: *anyopaque, builder: *anyopaque, size: DrawRect, scale: f32) void,
+    ctx: *anyopaque,
+};
+
+/// A rectangle, origin at the top-left. Matches `ui.geometry.Rect` field for
+/// field so a callback can reinterpret one as the other.
+pub const DrawRect = struct {
+    x: i32 = 0,
+    y: i32 = 0,
+    width: i32 = 0,
+    height: i32 = 0,
 };
 
 /// A rectangle in screen coordinates, origin at the top-left of the primary
