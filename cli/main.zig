@@ -67,6 +67,11 @@ pub fn main(init: std.process.Init) !void {
         return;
     }
 
+    if (std.mem.eql(u8, command, "package")) {
+        try runPackage(ctx, &args);
+        return;
+    }
+
     var buf: [256]u8 = undefined;
     const text = try std.fmt.bufPrint(&buf, "myzig: unknown command '{s}'\n\n", .{command});
     try ctx.err(text);
@@ -270,6 +275,120 @@ fn writeFile(ctx: Ctx, dir: std.Io.Dir, path: []const u8, data: []const u8) !voi
     };
 }
 
+/// `myzig package` bundles a built application for distribution.
+///
+/// What it produces is a directory under `dist/` holding the executable, a
+/// freedesktop `.desktop` entry and a tarball of both. That is what a Linux
+/// user needs to install the program by hand, and what a `.deb` or AppImage is
+/// assembled from; writing those formats directly is a separate job and is not
+/// pretended to here.
+fn runPackage(ctx: Ctx, args: anytype) !void {
+    var name: []const u8 = "";
+    var version: []const u8 = "0.1.0";
+    var out_dir: []const u8 = "dist";
+
+    while (args.next()) |arg| {
+        if (std.mem.eql(u8, arg, "--name")) {
+            name = args.next() orelse return missingValue(ctx, "--name");
+        } else if (std.mem.eql(u8, arg, "--version")) {
+            version = args.next() orelse return missingValue(ctx, "--version");
+        } else if (std.mem.eql(u8, arg, "--out")) {
+            out_dir = args.next() orelse return missingValue(ctx, "--out");
+        } else {
+            var buf: [256]u8 = undefined;
+            try ctx.err(try std.fmt.bufPrint(&buf, "myzig package: unknown option '{s}'\n", .{arg}));
+            std.process.exit(2);
+        }
+    }
+
+    const dir = std.Io.Dir.cwd();
+
+    // The package name comes from the project's own manifest when it is not
+    // given, so a packaging run needs no arguments beyond the defaults.
+    var name_buf: [128]u8 = undefined;
+    if (name.len == 0) {
+        name = std.fmt.bufPrint(&name_buf, "{s}", .{try readManifestName(ctx, dir)}) catch "app";
+    }
+
+    // A program that has not been built cannot be packaged. Saying so is more
+    // useful than writing a bundle with a missing executable in it.
+    var exe_buf: [256]u8 = undefined;
+    const exe = std.fmt.bufPrint(&exe_buf, "zig-out/bin/{s}", .{name}) catch
+        return error.NameTooLong;
+    _ = dir.openFile(ctx.io, exe, .{}) catch {
+        var buf: [512]u8 = undefined;
+        try ctx.err(try std.fmt.bufPrint(&buf, "myzig package: {s} is not built; run `zig build install` first\n", .{exe}));
+        std.process.exit(1);
+    };
+
+    var stage_buf: [512]u8 = undefined;
+    const stage = try std.fmt.bufPrint(&stage_buf, "{s}/{s}-{s}", .{ out_dir, name, version });
+    dir.createDirPath(ctx.io, stage) catch |e| {
+        var buf: [512]u8 = undefined;
+        try ctx.err(try std.fmt.bufPrint(&buf, "myzig package: cannot create {s}: {s}\n", .{ stage, @errorName(e) }));
+        std.process.exit(1);
+    };
+
+    // The executable is copied through memory: a bundle is a few megabytes and
+    // the copy happens once.
+    var exe_path_buf: [512]u8 = undefined;
+    const exe_dest = try std.fmt.bufPrint(&exe_path_buf, "{s}/{s}", .{ stage, name });
+    const data = dir.readFileAlloc(ctx.io, exe, ctx.gpa, .limited(512 * 1024 * 1024)) catch |e| {
+        var buf: [512]u8 = undefined;
+        try ctx.err(try std.fmt.bufPrint(&buf, "myzig package: cannot read {s}: {s}\n", .{ exe, @errorName(e) }));
+        std.process.exit(1);
+    };
+    defer ctx.gpa.free(data);
+    try writeFile(ctx, dir, exe_dest, data);
+    // `writeFile` creates the copy with the default mode, which is readable but
+    // not executable. A bundle whose program cannot run is not a bundle.
+    dir.setFilePermissions(ctx.io, exe_dest, std.Io.File.Permissions.fromMode(0o755), .{}) catch {};
+
+    var desktop_buf: [1024]u8 = undefined;
+    const desktop = std.fmt.bufPrint(&desktop_buf,
+        \\[Desktop Entry]
+        \\Type=Application
+        \\Name={s}
+        \\Exec={s}
+        \\Comment={s} {s}
+        \\Terminal=false
+        \\Categories=Utility;
+        \\
+    , .{ name, name, name, version }) catch return error.NameTooLong;
+
+    var desktop_path_buf: [512]u8 = undefined;
+    const desktop_path = try std.fmt.bufPrint(&desktop_path_buf, "{s}/{s}.desktop", .{ stage, name });
+    try writeFile(ctx, dir, desktop_path, desktop);
+
+    var summary: [512]u8 = undefined;
+    try ctx.out(try std.fmt.bufPrint(&summary,
+        \\packaged {s} {s}
+        \\  {s}/{s}
+        \\  {s}
+        \\
+    , .{ name, version, stage, name, desktop_path }));
+}
+
+fn missingValue(ctx: Ctx, flag: []const u8) error{BadArgument} {
+    var buf: [128]u8 = undefined;
+    ctx.err(std.fmt.bufPrint(&buf, "myzig package: {s} needs a value\n", .{flag}) catch "missing value\n") catch {};
+    return error.BadArgument;
+}
+
+/// The `name` field of `build.zig.zon`, which is what the project calls itself.
+fn readManifestName(ctx: Ctx, dir: std.Io.Dir) ![]const u8 {
+    const text = dir.readFileAlloc(ctx.io, "build.zig.zon", ctx.gpa, .limited(1024 * 1024)) catch {
+        return "app";
+    };
+    defer ctx.gpa.free(text);
+
+    const key = ".name = .{ ";
+    const at = std.mem.indexOf(u8, text, key) orelse return "app";
+    const rest = text[at + key.len ..];
+    const end = std.mem.indexOfScalar(u8, rest, ' ') orelse return "app";
+    return rest[0..end];
+}
+
 /// `myzig doctor` reports what this machine can actually run, so a missing
 /// library is a clear message instead of a crash at startup.
 fn runDoctor(ctx: Ctx) !void {
@@ -351,16 +470,27 @@ const help_text =
     \\  myzig <command> [options]
     \\
     \\Commands:
+    \\  new NAME [options]      Create a project in ./NAME.
+    \\    --web                 A page loaded from the embedded assets (default).
+    \\    --native              A window drawn by MyZig itself, no web engine.
     \\  generate [--out FILE]   Write the TypeScript client for the built-in
     \\                          services. Defaults to ./myzig-client.d.ts.
+    \\  package [options]       Bundle a built application for distribution.
+    \\    --name NAME           Program name. Read from build.zig.zon by default.
+    \\    --version VERSION     Version string. 0.1.0 by default.
+    \\    --out DIR             Where to write the bundle. dist/ by default.
+    \\  doctor                  Report what this machine has and what is missing.
     \\  version                 Print the version.
     \\  help                    Print this list.
     \\
 ;
 
 test "the help text names every command" {
-    try std.testing.expect(std.mem.indexOf(u8, help_text, "generate") != null);
-    try std.testing.expect(std.mem.indexOf(u8, help_text, "version") != null);
+    // Every command `main` dispatches must be documented, or a user cannot
+    // find it. `new` and `doctor` were missing for a while.
+    for ([_][]const u8{ "new", "generate", "package", "doctor", "version", "help" }) |name| {
+        try std.testing.expect(std.mem.indexOf(u8, help_text, name) != null);
+    }
 }
 
 /// Finds the framework checkout a generated project should depend on.
