@@ -91,6 +91,8 @@ pub fn vtable() app_mod.App.Backend.Vtable {
         .wake = wake,
         .request_frame = requestFrame,
         .present = presentFrame,
+        .create_tray = createTray,
+        .destroy_tray = destroyTray,
     };
 }
 
@@ -322,6 +324,23 @@ fn wake(ctx: *anyopaque) void {
 fn requestFrame(ctx: *anyopaque, id: u32) void {
     _ = ctx;
     windows.requestFrame(id);
+}
+
+fn createTray(ctx: *anyopaque, icon_name: []const u8, tooltip: []const u8) bool {
+    // Linux builds its tray in `gtray.zig`, which needs the application
+    // allocator that this contract does not carry; `App.createTray` calls it
+    // directly and never reaches this function. It answers false so a mistake
+    // that does route here shows up as "no tray" rather than as an icon with
+    // no owner.
+    _ = ctx;
+    _ = icon_name;
+    _ = tooltip;
+    return false;
+}
+
+fn destroyTray(ctx: *anyopaque) void {
+    _ = ctx;
+    @import("gtray.zig").destroy();
 }
 
 fn presentFrame(ctx: *anyopaque, id: u32) void {

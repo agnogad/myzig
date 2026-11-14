@@ -102,6 +102,8 @@ pub fn vtable() app_mod.App.Backend.Vtable {
         .wake = wake,
         .request_frame = requestFrame,
         .present = present,
+        .create_tray = createTray,
+        .destroy_tray = destroyTray,
     };
 }
 
@@ -252,6 +254,14 @@ fn requestFrame(ctx: *anyopaque, id: u32) void {
     _ = id;
     selfOf(ctx).frames += 1;
 }
+
+/// The in-memory backend has no desktop, so it answers honestly: there is no
+/// status area to put an icon in.
+fn createTray(_: *anyopaque, _: []const u8, _: []const u8) bool {
+    return false;
+}
+
+fn destroyTray(_: *anyopaque) void {}
 
 fn present(ctx: *anyopaque, id: u32) void {
     _ = ctx;

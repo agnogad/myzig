@@ -185,11 +185,26 @@ fn configureNative(mod: *std.Build.Module, target: std.Build.ResolvedTarget) voi
     if (target.result.os.tag == .windows) {
         mod.linkSystemLibrary("bcryptprimitives", .{});
     } else if (target.result.os.tag == .macos) {
-        // A macOS build needs the platform SDK to find these, and a Linux host
-        // has none. The backend is written and its *compilation* is checked
-        // here; linking is checked on a Mac. Saying so is better than a build
-        // that pretends to be cross-compiled for a system it cannot link for.
+        // macOS is the exception to "load everything at run time": `libobjc` is
+        // linked by name (the Objective-C runtime *is* the platform) and the
+        // three frameworks the backend messages have to be named, or the link
+        // fails on `objc_msgSend`'s neighbours and every AppKit class lookup
+        // the system performs.
+        //
+        // A cross-compile from another host also needs the platform SDK, and no
+        // other host has one:
         //
         //   zig build -Dtarget=aarch64-macos -Dmacos-sdk=/path/to/MacOSX.sdk
+        //
+        // Until then the backend's *compilation* is what is checked from here,
+        // which is why the frameworks are only named when the build machine is
+        // a Mac. A build that names them without an SDK fails to find any, and
+        // a failed build hides the one thing this host can verify.
+        if (@import("builtin").target.os.tag == .macos) {
+            mod.linkFramework("AppKit", .{});
+            mod.linkFramework("Foundation", .{});
+            mod.linkFramework("WebKit", .{});
+            mod.linkFramework("CoreGraphics", .{});
+        }
     }
 }

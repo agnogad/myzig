@@ -118,6 +118,18 @@ test {
     _ = @import("plugins/plugins.zig");
     // The platform FFI layer is only compiled for the platform it belongs to;
     // importing it unconditionally would pull GTK into a Windows build.
+    // The macOS backend imports only what a host can also compile — no
+    // `extern` framework symbols, since every Objective-C entry point is
+    // looked up through `std.DynLib`. That makes the parts with pure logic
+    // (menu accelerators, block layout) testable on Linux, where the CI runs.
+    _ = @import("platform/macos/menu.zig");
+    _ = @import("platform/macos/objc.zig");
+    _ = @import("platform/macos/surface.zig");
+    _ = @import("platform/macos/a11y.zig");
+    _ = @import("platform/macos/hotkey.zig");
+    _ = @import("platform/macos/desktop.zig");
+    _ = @import("platform/windows/desktop.zig");
+    _ = @import("platform/windows/hotkey.zig");
     if (@import("builtin").os.tag == .linux) {
         // Re-exported so a test program can drive the bridge directly.
         _ = @import("platform/linux/ffi.zig");

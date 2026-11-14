@@ -34,6 +34,8 @@ const log = @import("../../log.zig");
 const ui = @import("../../ui/ui.zig");
 const ffi = @import("ffi.zig");
 const webview2 = @import("webview2.zig");
+const desktop_mod = @import("desktop.zig");
+const hotkey_mod = @import("hotkey.zig");
 
 /// The window class MyZig registers. One class serves every window.
 const class_name = std.unicode.utf8ToUtf16LeStringLiteral("MyZigWindow");
@@ -74,6 +76,7 @@ fn init(ctx: *anyopaque, app: *app_mod.App) errors.InitError!void {
     self.app_gpa = app.gpa;
     wake_sink = self.sink;
     self.main_thread = ffi.GetCurrentThreadId();
+    hotkey_mod.init(app.gpa, &onGlobalShortcut);
 
     // Per-monitor DPI awareness: without it Windows scales the whole window
     // bitmap and text is blurry on a high-DPI screen.
@@ -103,8 +106,20 @@ fn init(ctx: *anyopaque, app: *app_mod.App) errors.InitError!void {
     log.info("windows backend ready", .{});
 }
 
+/// A global shortcut fired. The binding is reported to the application through
+/// the same sink every other event uses.
+fn onGlobalShortcut(accel: []const u8) void {
+    if (comptime builtin.os.tag != .windows) return;
+    const sink = wake_sink orelse return;
+    sink.shortcutPressed(accel);
+}
+
 fn deinit(ctx: *anyopaque) void {
     const self = impl(ctx);
+    // A binding outlives the process otherwise: Windows keeps the chord
+    // claimed, so a later run of the same application finds it "already
+    // taken" by itself.
+    hotkey_mod.deinit();
     if (self.class_registered) {
         _ = ffi.UnregisterClassW(class_name, self.instance);
         self.class_registered = false;
@@ -126,6 +141,17 @@ fn run(ctx: *anyopaque) errors.InitError!void {
         const rc = ffi.GetMessageW(&msg, null, 0, 0);
         if (rc == 0) break; // WM_QUIT
         if (rc < 0) break; // an error; the loop cannot continue
+
+        // A thread-level hotkey has no window, so `WM_HOTKEY` is delivered to
+        // the queue itself and never reaches a window procedure. It is handled
+        // here, before dispatch, or it would be dropped as an unknown message.
+        if (msg.message == ffi.WM_HOTKEY) {
+            // The id is the low word of `wParam`; ids are small and assigned
+            // from 1, so the truncation cannot lose anything.
+            _ = hotkey_mod.dispatch(@intCast(msg.wParam & 0xffff));
+            continue;
+        }
+
         _ = ffi.TranslateMessage(&msg);
         _ = ffi.DispatchMessageW(&msg);
     }
@@ -600,6 +626,177 @@ fn requestFrame(ctx: *anyopaque, id: u32) void {
     _ = ffi.InvalidateRect(h, null, ffi.FALSE);
 }
 
+// ---------------------------------------------------------------------- tray
+
+/// The tray icon, if one is shown.
+///
+/// `Shell_NotifyIcon` needs a window to send its callback messages to, so a
+/// message-only window is created for it: it has no visible surface, which is
+/// exactly right for something whose only job is to receive clicks from a
+/// second icon in the notification area.
+var tray = struct {
+    added: bool = false,
+    window: ?ffi.HWND = null,
+    icon: ?ffi.HICON = null,
+    /// Whether `DestroyIcon` is ours to call: an icon from `LoadIcon` is shared
+    /// and must not be destroyed.
+    owns_icon: bool = false,
+    sink: ?backend.EventSink = null,
+}{};
+
+/// The window procedure of the tray's message-only window.
+///
+/// Windows sends `WM_MYZIG_TRAY` with the actual event in `lparam`, which is
+/// why the message is not compared against the click directly.
+fn trayProc(hwnd: ffi.HWND, message: ffi.UINT, wparam: ffi.WPARAM, lparam: ffi.LPARAM) callconv(ffi.WINAPI) ffi.LRESULT {
+    if (message == ffi.WM_MYZIG_TRAY) {
+        // Version 4 puts the icon id in the high word and the event in the low
+        // one; there is a single tray id, so only the event matters.
+        const event: ffi.UINT = @truncate(@as(usize, @bitCast(lparam)));
+        std.debug.assert((wparam >> 16) <= 1);
+        if (desktop_mod.trayItemOf(event)) |item| {
+            if (tray.sink) |sink| sink.vtable.tray_clicked(sink.ctx, item);
+        }
+        return 0;
+    }
+    if (message == ffi.WM_DESTROY) {
+        tray.window = null;
+        return 0;
+    }
+    return ffi.DefWindowProcW(hwnd, message, wparam, lparam);
+}
+
+/// Creates the message-only window the tray needs, once.
+fn trayWindow() ?ffi.HWND {
+    if (tray.window) |w| return w;
+
+    const instance = ffi.GetModuleHandleW(null);
+    const name = std.unicode.utf8ToUtf16LeStringLiteral("MyZigTray");
+    const wc = ffi.WNDCLASSEXW{
+        .cbSize = @sizeOf(ffi.WNDCLASSEXW),
+        .style = 0,
+        .lpfnWndProc = trayProc,
+        .cbClsExtra = 0,
+        .cbWndExtra = 0,
+        .hInstance = instance,
+        .hIcon = null,
+        .hCursor = null,
+        .hbrBackground = null,
+        .lpszMenuName = null,
+        .lpszClassName = name,
+        .hIconSm = null,
+    };
+    _ = ffi.RegisterClassExW(&wc);
+
+    // `HWND_MESSAGE` (a -3 parent) makes it a message-only window: it exists to
+    // receive the tray's callbacks and never appears on screen.
+    const hwnd = ffi.CreateWindowExW(
+        0,
+        name,
+        name,
+        0,
+        0,
+        0,
+        0,
+        0,
+        @ptrFromInt(@as(usize, @bitCast(@as(isize, -3)))),
+        null,
+        instance,
+        null,
+    ) orelse return null;
+    tray.window = hwnd;
+    return hwnd;
+}
+
+fn createTray(ctx: *anyopaque, icon_name: []const u8, tooltip: []const u8) bool {
+    _ = ctx;
+    _ = icon_name;
+    if (comptime builtin.os.tag != .windows) return false;
+    if (tray.added) return true;
+
+    const hwnd = trayWindow() orelse return false;
+
+    // The application's own icon if it has one, else the stock one. `LoadIcon`
+    // returns a shared handle that must not be destroyed.
+    var icon: ?ffi.HICON = null;
+    if (ffi.GetModuleHandleW(null)) |hmod| {
+        const inst = ffi.LoadIconW(hmod, ffi.IDI_APPLICATION);
+        if (inst) |i| icon = i;
+    }
+
+    var data = ffi.NOTIFYICONDATAW{
+        .cbSize = @sizeOf(ffi.NOTIFYICONDATAW),
+        .hWnd = hwnd,
+        .uID = 1,
+        .uFlags = ffi.NIF_MESSAGE | ffi.NIF_ICON | ffi.NIF_TIP | ffi.NIF_SHOWTIP,
+        .uCallbackMessage = ffi.WM_MYZIG_TRAY,
+        .hIcon = icon,
+        .szTip = @splat(0),
+    };
+    if (tooltip.len > 0) {
+        _ = ffi.utf16(&data.szTip, tooltip);
+    }
+
+    if (ffi.Shell_NotifyIconW(ffi.NIM_ADD, &data) == 0) return false;
+
+    // Version 4 changes what the callback message carries, so it is requested
+    // after the icon exists.
+    var version = data;
+    version.uTimeoutOrVersion = ffi.NOTIFYICON_VERSION_4;
+    _ = ffi.Shell_NotifyIconW(ffi.NIM_SETVERSION, &version);
+
+    tray.added = true;
+    tray.icon = icon;
+    tray.sink = wake_sink;
+    return true;
+}
+
+/// The window a notification balloon is sent through, or null when no tray
+/// icon is shown: a balloon needs an icon to hang from.
+///
+/// Exposed for `desktop.zig` rather than sharing `tray` directly, so the tray
+/// state stays private to this file.
+pub fn trayNotifyWindow() ?ffi.HWND {
+    if (!tray.added) return null;
+    return tray.window;
+}
+
+/// A `NOTIFYICONDATAW` naming the tray icon, for a caller that only fills in
+/// the fields it needs.
+pub fn trayBlankData(hwnd: ffi.HWND) ffi.NOTIFYICONDATAW {
+    return .{
+        .cbSize = @sizeOf(ffi.NOTIFYICONDATAW),
+        .hWnd = hwnd,
+        .uID = 1,
+        .uFlags = 0,
+        .uCallbackMessage = 0,
+        .hIcon = null,
+        .szTip = @splat(0),
+    };
+}
+
+fn destroyTray(ctx: *anyopaque) void {
+    _ = ctx;
+    if (comptime builtin.os.tag != .windows) return;
+    if (!tray.added) return;
+
+    if (tray.window) |hwnd| {
+        var data = ffi.NOTIFYICONDATAW{
+            .cbSize = @sizeOf(ffi.NOTIFYICONDATAW),
+            .hWnd = hwnd,
+            .uID = 1,
+            .uFlags = 0,
+            .uCallbackMessage = 0,
+            .hIcon = null,
+            .szTip = @splat(0),
+        };
+        _ = ffi.Shell_NotifyIconW(ffi.NIM_DELETE, &data);
+    }
+    // A loaded stock icon is shared and not ours; anything we made would be
+    // destroyed here. Nothing is, so nothing is freed.
+    tray = .{};
+}
+
 fn present(ctx: *anyopaque, id: u32) void {
     requestFrame(ctx, id);
 }
@@ -850,5 +1047,7 @@ pub fn vtable() app_mod.App.Backend.Vtable {
         .wake = wake,
         .request_frame = requestFrame,
         .present = present,
+        .create_tray = createTray,
+        .destroy_tray = destroyTray,
     };
 }

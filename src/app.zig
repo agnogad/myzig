@@ -519,6 +519,8 @@ pub const App = struct {
         }
         return switch (backend.current) {
             .linux => .{ .ctx = null, .vtable = &@import("platform/linux/desktop.zig").vtable() },
+            .windows => .{ .ctx = null, .vtable = &@import("platform/windows/desktop.zig").vtable() },
+            .macos => .{ .ctx = null, .vtable = &@import("platform/macos/desktop.zig").vtable() },
             else => .{ .ctx = null, .vtable = &inert_desktop },
         };
     }
@@ -573,6 +575,8 @@ pub const App = struct {
     /// call fall through to the inert table.
     const desktop_vtable: desktop_mod.Desktop.VTable = switch (backend.current) {
         .linux => @import("platform/linux/desktop.zig").vtable(),
+        .windows => @import("platform/windows/desktop.zig").vtable(),
+        .macos => @import("platform/macos/desktop.zig").vtable(),
         else => App.inert_desktop,
     };
     const desktop_backend: desktop_mod.Desktop = .{
@@ -596,8 +600,12 @@ pub const App = struct {
     pub fn createTray(self: *App, icon_name: []const u8, tooltip: []const u8) bool {
         if (self.phase != .running) return false;
         return switch (backend.current) {
+            // Linux builds the tray itself, because it needs the GTK window that
+            // owns the icon and a D-Bus client that outlives it.
             .linux => @import("platform/linux/gtray.zig").create(self.gpa, icon_name, tooltip),
-            else => false,
+            // Every other backend owns its tray, so the call goes through the
+            // contract and a backend without one answers false.
+            else => self.be.vtable.create_tray(self.be.ctx, icon_name, tooltip),
         };
     }
 
@@ -606,7 +614,7 @@ pub const App = struct {
         if (self.phase != .running) return;
         switch (backend.current) {
             .linux => @import("platform/linux/gtray.zig").destroy(),
-            else => {},
+            else => self.be.vtable.destroy_tray(self.be.ctx),
         }
     }
 
@@ -624,6 +632,8 @@ pub const App = struct {
                 .accel = parsed,
                 .text = accel,
             }),
+            .macos => @import("platform/macos/hotkey.zig").register(parsed, accel),
+            .windows => @import("platform/windows/hotkey.zig").register(parsed, accel),
             else => error.NotSupported,
         };
     }
@@ -718,6 +728,9 @@ pub const App = struct {
             wake: *const fn (ctx: *anyopaque) void,
             request_frame: *const fn (ctx: *anyopaque, id: u32) void,
             present: *const fn (ctx: *anyopaque, id: u32) void,
+            /// Shows a status-area icon. Answers whether this desktop has one.
+            create_tray: *const fn (ctx: *anyopaque, icon_name: []const u8, tooltip: []const u8) bool,
+            destroy_tray: *const fn (ctx: *anyopaque) void,
         };
     };
 
