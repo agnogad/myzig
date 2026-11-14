@@ -104,10 +104,10 @@ implying otherwise.
 | Plugins | works |
 | `myzig` command line: `new`, `generate`, `package`, `package --deb`, `doctor` | works |
 | Windows backend (Win32 + WebView2) | compiles for Windows, never run |
-| macOS backend (AppKit + WKWebView) | compiles for macOS, never run |
+| macOS backend (AppKit + WKWebView) | compiles and links for macOS, never run |
 | GPU rendering, text beyond Latin-1 | not started |
 
-Verified today: 155 unit tests, 12 examples launched under Xvfb with no console
+Verified today: 206 unit tests, 12 examples launched under Xvfb with no console
 error, and a real Wayland session with a captured window.
 
 ---
@@ -192,7 +192,7 @@ Build all eleven with `zig build examples`, or one with `zig build <name>`.
 ## Tests
 
 ```sh
-zig build test --summary all   # 155 unit tests, in-memory backend, no display
+zig build test --summary all   # 206 unit tests (1 skipped off macOS), no display
 bash scripts/smoke.sh          # launches every example under Xvfb
 ```
 

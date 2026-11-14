@@ -19,7 +19,11 @@ FAILED=0
 PASSED=0
 
 start_display() {
-    if [ -n "${DISPLAY:-}" ] && xdpyinfo >/dev/null 2>&1; then
+    # Always a fresh display, never the caller's session: reusing whatever
+    # DISPLAY is set opens example windows on the desktop of someone trying to
+    # work, which is exactly what a smoke test must not do. Set
+    # SMOKE_USE_SESSION=1 to opt into the real display deliberately.
+    if [ "${SMOKE_USE_SESSION:-0}" = "1" ] && [ -n "${DISPLAY:-}" ]; then
         return
     fi
     if ! pgrep -f "Xvfb :$DISPLAY_NUM" >/dev/null 2>&1; then

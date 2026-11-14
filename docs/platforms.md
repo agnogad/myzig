@@ -78,10 +78,10 @@ section says so rather than claiming otherwise.
 | `myzig://` scheme | **not written** | WebView2 needs a resource filter; pages load from `http` or `file` today |
 | Typed IPC | written, unrun | same bridge script as Linux |
 | Menu bar | written, unrun | `CreatePopupMenu` + `AppendMenu`, ids via `WM_COMMAND` |
-| Tray icon | **not written** | needs `Shell_NotifyIcon` |
-| Global shortcuts | **not written** | needs `RegisterHotKey` |
+| Tray icon | written, unrun | `Shell_NotifyIcon` on a message-only window |
+| Global shortcuts | written, unrun | `RegisterHotKey`, delivered as `WM_HOTKEY` to the message loop |
 | Native UI surface | written, unrun | off-screen DIB + `BitBlt`, software rasteriser |
-| Desktop APIs | **not written** | clipboard, dialogs, notifications |
+| Desktop APIs | written, unrun | clipboard, file dialogs, message boxes; notifications go to a tray balloon; reveal-in-folder answers `false` |
 
 `WebView2Loader.dll` is opened at runtime, so an application that never opens a
 page never needs it. `bcryptprimitives.dll` is linked, because it is the only
@@ -100,27 +100,53 @@ does, not what has been seen.
 
 The backend talks to AppKit and WebKit through the Objective-C runtime, which
 is opened by name (`/usr/lib/libobjc.A.dylib`) rather than linked: macOS has no
-`dlopen` step for it, and opening it by name means a Linux host can compile the
-backend without a macOS SDK. On a Mac the frameworks still have to be linked —
-`zig build -Dtarget=aarch64-macos` needs the SDK to find them.
+`dlopen` step for it, and opening it by name means a Linux host can compile
+**and link** the backend without a macOS SDK. Every entry point this backend
+uses — `objc_msgSend`, `objc_allocateClassPair`, `class_addMethod`,
+`objc_setAssociatedObject` and the rest — is looked up that way, so
+`zig build -Dtarget=aarch64-macos` produces a real Mach-O binary on a Linux
+host. A build *on* a Mac additionally links AppKit, Foundation, WebKit and
+CoreGraphics (`build.zig`), which is what a runnable application needs.
+
+Delegates and menu targets are classes built at run time from Zig function
+pointers (`delegate.zig`), so the backend still compiles no Objective-C.
 
 | Feature | State |
 | --- | --- |
 | Window creation, title, frame, show/hide, focus | written |
 | Minimise, restore, zoom, always-on-top, full screen | written |
 | page and hybrid windows | `WKWebView`, written |
-| native windows | bitmap surface allocated, **no input** |
-| `evalJs` | written, but the reply is dropped: no completion block is built |
-| `injectScript` | **not written** — needs `WKUserScript` and a content controller |
-| window menus | **not written** — needs `NSMenu` |
-| tray, global shortcuts, desktop APIs | **not written** |
+| native windows | written: an `NSView` subclass rasterises the canvas into a `CGImage` |
+| native input | written: mouse press/release/drag, wheel, key down/up, committed text |
+| native accessibility | written: an `NSAccessibilityElement` tree, published per frame |
+| `evalJs` | written: a completion block is passed, so the reply path exists |
+| `injectScript` | written: `WKUserScript` in a `WKUserContentController` |
+| window menus | written: an `NSMenu` bar on `NSApp`, clicks by tag |
+| tray | written: `NSStatusItem` with a one-entry menu |
+| close button asks before closing | written: a window delegate reports the request |
+| page load finished / failed events | written: a navigation delegate |
+| monitors, system theme | written: `NSScreen`, `effectiveAppearance` |
+| calling from another thread | written: `dispatch_async_f` to the main queue |
+| global shortcuts, desktop APIs | **not written** |
 | `myzig://` scheme | **not written** — a page is loaded from a URL the system can reach |
-| monitors, system theme | **not written** — the answers are "none" and "light" |
 
-Two things are absences rather than bugs, and both are marked in the code: a
-call from another thread is dropped instead of being run on a background thread
-(AppKit is not thread-safe, and hopping to the main queue needs a block), and a
-native window's mouse presses are not delivered to the application.
+Global shortcuts are written, through Carbon's `RegisterEventHotKey` rather
+than an `NSEvent` monitor: a monitor would ask the user to grant Accessibility
+permission, which many people decline, leaving the shortcut silently dead.
+
+The desktop APIs are written: clipboard (`NSPasteboard`), file dialogs
+(`NSOpenPanel`/`NSSavePanel`), message boxes (`NSAlert`), opening a URL and
+revealing a file (`NSWorkspace`), and the light/dark preference. Notifications
+are the one deliberate gap: `NSUserNotificationCenter` needs a bundle
+identifier and is deprecated, and `UNUserNotificationCenter` needs an
+authorization prompt this backend cannot await, so `notify` returns `false`
+rather than posting something macOS would silently drop.
+
+**A caveat about blocks.** `evaluateJavaScript:completionHandler:` needs a
+block, which this backend builds by hand from the ABI's layout (`objc.zig`).
+The block it passes is a *global* block — it captures nothing — which is the
+only kind that is safe to share as static data. Nothing here has been run to
+confirm the runtime accepts it.
 
 ## What "not supported" looks like
 
