@@ -85,6 +85,7 @@ pub const WM_COMMAND: UINT = 0x0111;
 pub const WM_APP: UINT = 0x8000;
 pub const WM_LBUTTONDOWN: UINT = 0x0201;
 pub const WM_LBUTTONUP: UINT = 0x0202;
+pub const WM_RBUTTONUP: UINT = 0x0205;
 pub const WM_MOUSEMOVE: UINT = 0x0200;
 pub const WM_SETTINGCHANGE: UINT = 0x001A;
 pub const WM_DPICHANGED: UINT = 0x02E0;
@@ -312,6 +313,178 @@ pub extern "kernel32" fn LoadLibraryW([*:0]const u16) callconv(WINAPI) ?HMODULE;
 pub extern "kernel32" fn GetProcAddress(HMODULE, [*:0]const u8) callconv(WINAPI) ?*const anyopaque;
 pub extern "kernel32" fn FreeLibrary(HMODULE) callconv(WINAPI) BOOL;
 
+// clipboard ----------------------------------------------------------------
+pub extern "user32" fn OpenClipboard(?HWND) callconv(WINAPI) BOOL;
+pub extern "user32" fn CloseClipboard() callconv(WINAPI) BOOL;
+pub extern "user32" fn EmptyClipboard() callconv(WINAPI) BOOL;
+pub extern "user32" fn GetClipboardData(UINT) callconv(WINAPI) ?HANDLE;
+pub extern "user32" fn SetClipboardData(UINT, HANDLE) callconv(WINAPI) ?HANDLE;
+pub extern "user32" fn IsClipboardFormatAvailable(UINT) callconv(WINAPI) BOOL;
+
+// heap ---------------------------------------------------------------------
+pub extern "kernel32" fn GlobalAlloc(UINT, usize) callconv(WINAPI) ?HANDLE;
+pub extern "kernel32" fn GlobalLock(HANDLE) callconv(WINAPI) ?*anyopaque;
+pub extern "kernel32" fn GlobalUnlock(HANDLE) callconv(WINAPI) BOOL;
+pub extern "kernel32" fn GlobalFree(HANDLE) callconv(WINAPI) ?HANDLE;
+
+// comdlg32 -----------------------------------------------------------------
+/// `OPENFILENAMEW`. `lStructSize` must be set to `@sizeOf` this struct or the
+/// call fails with no explanation.
+pub const OPENFILENAMEW = extern struct {
+    lStructSize: DWORD,
+    hwndOwner: ?HWND,
+    hInstance: ?HINSTANCE = null,
+    lpstrFilter: ?[*:0]const u16 = null,
+    lpstrCustomFilter: ?[*:0]u16 = null,
+    nMaxCustFilter: DWORD = 0,
+    nFilterIndex: DWORD = 0,
+    lpstrFile: [*:0]u16 = undefined,
+    nMaxFile: DWORD = 0,
+    lpstrFileTitle: ?[*:0]u16 = null,
+    nMaxFileTitle: DWORD = 0,
+    lpstrInitialDir: ?[*:0]const u16 = null,
+    lpstrTitle: ?[*:0]const u16 = null,
+    Flags: DWORD = 0,
+    nFileOffset: u16 = 0,
+    nFileExtension: u16 = 0,
+    lpstrDefExt: ?[*:0]const u16 = null,
+    lCustData: LPARAM = 0,
+    lpfnHook: ?*const anyopaque = null,
+    lpTemplateName: ?[*:0]const u16 = null,
+    pvReserved: ?*anyopaque = null,
+    dwReserved: DWORD = 0,
+    FlagsEx: DWORD = 0,
+};
+
+pub extern "comdlg32" fn GetOpenFileNameW(*OPENFILENAMEW) callconv(WINAPI) BOOL;
+pub extern "comdlg32" fn GetSaveFileNameW(*OPENFILENAMEW) callconv(WINAPI) BOOL;
+
+pub const OFN_READONLY: DWORD = 0x0000_0001;
+pub const OFN_OVERWRITEPROMPT: DWORD = 0x0000_0002;
+pub const OFN_NOCHANGEDIR: DWORD = 0x0000_0008;
+pub const OFN_PATHMUSTEXIST: DWORD = 0x0000_0800;
+pub const OFN_FILEMUSTEXIST: DWORD = 0x0000_1000;
+pub const OFN_ALLOWMULTISELECT: DWORD = 0x0000_0200;
+pub const OFN_EXPLORER: DWORD = 0x0008_0000;
+
+// hotkeys ------------------------------------------------------------------
+pub extern "user32" fn RegisterHotKey(?HWND, c_int, UINT, UINT) callconv(WINAPI) BOOL;
+pub extern "user32" fn UnregisterHotKey(?HWND, c_int) callconv(WINAPI) BOOL;
+
+/// `MOD_*` masks. These are the opposite convention to the `WM_KEYDOWN`
+/// modifiers: `MOD_ALT` is 1, not a bit far up, and `MOD_WIN` is 8.
+pub const MOD_ALT: UINT = 0x0001;
+pub const MOD_CONTROL: UINT = 0x0002;
+pub const MOD_SHIFT: UINT = 0x0004;
+pub const MOD_WIN: UINT = 0x0008;
+/// Stops the chord reaching the focused application; MyZig does not set it, so
+/// a shortcut does not swallow the key for everyone else.
+pub const MOD_NOREPEAT: UINT = 0x4000;
+
+/// `WM_HOTKEY` is posted to the thread's message queue with the hotkey's id in
+/// `wparam`.
+pub const WM_HOTKEY: UINT = 0x0312;
+
+/// `ERROR_HOTKEY_ALREADY_REGISTERED`, which `RegisterHotKey` reports through
+/// `GetLastError` rather than as its return value.
+pub const ERROR_HOTKEY_ALREADY_REGISTERED: i32 = 1409;
+
+pub extern "kernel32" fn GetLastError() callconv(WINAPI) DWORD;
+
+/// Virtual-key codes. These are ASCII for the letters and digits, which is the
+/// one place Win32 is kinder than Carbon, but the named keys are not.
+pub const VK_BACK: UINT = 0x08;
+pub const VK_TAB: UINT = 0x09;
+pub const VK_RETURN: UINT = 0x0D;
+pub const VK_ESCAPE: UINT = 0x1B;
+pub const VK_SPACE: UINT = 0x20;
+pub const VK_PRIOR: UINT = 0x21; // Page Up
+pub const VK_NEXT: UINT = 0x22; // Page Down
+pub const VK_END: UINT = 0x23; // End
+pub const VK_HOME: UINT = 0x24; // Home
+pub const VK_LEFT: UINT = 0x25;
+pub const VK_UP: UINT = 0x26;
+pub const VK_RIGHT: UINT = 0x27;
+pub const VK_DOWN: UINT = 0x28;
+pub const VK_INSERT: UINT = 0x2D;
+pub const VK_DELETE: UINT = 0x2E;
+pub const VK_F1: UINT = 0x70;
+
+// tray ---------------------------------------------------------------------
+/// `NOTIFYICONDATAW`. `cbSize` must be `@sizeOf` this struct, and the version
+/// field decides which tail fields Windows reads. It is set to the newest
+/// layout these declarations describe, so every field below is honoured.
+pub const NOTIFYICONDATAW = extern struct {
+    cbSize: DWORD,
+    hWnd: HWND,
+    uID: UINT,
+    uFlags: UINT,
+    uCallbackMessage: UINT,
+    hIcon: ?HICON,
+    szTip: [128]u16,
+    dwState: DWORD = 0,
+    dwStateMask: DWORD = 0,
+    szInfo: [256]u16 = @splat(0),
+    /// The timeout, unioned with the version marker. Zero means the version
+    /// tied to `cbSize`, so the plain timeout is what is written.
+    uTimeoutOrVersion: UINT = 0,
+    szInfoTitle: [64]u16 = @splat(0),
+    dwInfoFlags: DWORD = 0,
+    guidItem: GUID = .{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = @splat(0) },
+    hBalloonIcon: ?HICON = null,
+};
+
+pub extern "shell32" fn Shell_NotifyIconW(DWORD, *NOTIFYICONDATAW) callconv(WINAPI) BOOL;
+pub extern "shell32" fn ExtractIconExW(
+    [*:0]const u16,
+    c_int,
+    ?*?HICON,
+    ?*?HICON,
+    UINT,
+) callconv(WINAPI) UINT;
+
+pub extern "user32" fn LoadIconW(?HINSTANCE, ?[*:0]const u16) callconv(WINAPI) ?HICON;
+pub extern "user32" fn DestroyIcon(?HICON) callconv(WINAPI) BOOL;
+/// `NOTIFYICONDATAW` flags.
+pub const NIF_MESSAGE: UINT = 0x0000_0001;
+pub const NIF_ICON: UINT = 0x0000_0002;
+pub const NIF_TIP: UINT = 0x0000_0004;
+pub const NIF_INFO: UINT = 0x0000_0010;
+pub const NIF_SHOWTIP: UINT = 0x0000_0080;
+
+/// `Shell_NotifyIconW` messages.
+pub const NIM_ADD: DWORD = 0x0000_0000;
+pub const NIM_MODIFY: DWORD = 0x0000_0001;
+pub const NIM_DELETE: DWORD = 0x0000_0002;
+pub const NIM_SETVERSION: DWORD = 0x0000_0004;
+
+/// The balloon icon kinds.
+pub const NIIF_NONE: DWORD = 0x0000_0000;
+pub const NIIF_INFO: DWORD = 0x0000_0001;
+pub const NIIF_WARNING: DWORD = 0x0000_0002;
+pub const NIIF_ERROR: DWORD = 0x0000_0003;
+pub const NIIF_NOSOUND: DWORD = 0x0000_0010;
+
+/// The notification-version marker for `uTimeoutOrVersion`, which selects the
+/// layout Windows reads.
+pub const NOTIFYICON_VERSION_4: UINT = 4;
+
+/// `IDI_APPLICATION`, the fallback icon when the caller names none.
+pub const IDI_APPLICATION_RESOURCE: usize = 32512;
+/// The one-`LOWORD`-full idiom for `MAKEINTRESOURCE(IDI_APPLICATION)`.
+pub const IDI_APPLICATION: [*:0]const u16 = @ptrFromInt(32512);
+
+/// The tray callback message. `WM_APP + n` so it cannot collide with a Win32
+/// message; the exact offset is MyZig's choice as long as nothing else uses it.
+pub const WM_MYZIG_TRAY: UINT = 0x8000 + 2;
+
+/// `NIN_SELECT` and the right-click message Windows sends to the tray window.
+pub const NIN_SELECT: UINT = 0x0400;
+pub const WM_CONTEXTMENU: UINT = 0x007B;
+
+/// `SendMessageTimeout` flags used to broadcast a taskbar-restart notice.
+pub const WM_TASKBARCREATED_KEY: [*:0]const u16 = std.unicode.utf8ToUtf16LeStringLiteral("TaskbarCreated");
+
 // shell32 ------------------------------------------------------------------
 pub extern "shell32" fn ShellExecuteW(
     ?HWND,
@@ -339,13 +512,42 @@ pub extern "ole32" fn CoTaskMemFree(?*anyopaque) callconv(WINAPI) void;
 ///
 /// Win32's wide APIs take UTF-16, and every string MyZig hands them is short —
 /// a title, a URL, a menu label — so a caller buffer is cheaper than an
-/// allocation and cannot fail.
+/// allocation.
+///
+/// The buffer is checked first, because `std.unicode.utf8ToUtf16Le` documents
+/// that it "assumes there is enough space": with a short slice it writes past
+/// the end and aborts rather than returning an error. An earlier version of
+/// this function relied on that assumed error and crashed in its own test.
 pub fn utf16(buf: []u16, s: []const u8) ?[*:0]const u16 {
     if (buf.len == 0) return null;
     const room = buf.len - 1;
+
+    // An upper bound on the code units needed: every UTF-8 byte becomes at
+    // most one UTF-16 unit, except a 4-byte sequence, which becomes two. So
+    // the count is never more than the byte length.
+    if (s.len > room) {
+        // The real count may still fit when the extra bytes were continuation
+        // bytes, so it is computed exactly rather than rejected outright.
+        const needed = utf16Len(s) orelse return null;
+        if (needed > room) return null;
+    }
+
     const n = std.unicode.utf8ToUtf16Le(buf[0..room], s) catch return null;
     buf[n] = 0;
     return @ptrCast(buf.ptr);
+}
+
+/// How many UTF-16 code units `s` needs, or null when it is not valid UTF-8.
+///
+/// A rune outside the BMP needs two units, which is the whole reason a byte
+/// count is not an answer.
+pub fn utf16Len(s: []const u8) ?usize {
+    var units: usize = 0;
+    var it = std.unicode.Utf8Iterator{ .bytes = s, .i = 0 };
+    while (it.nextCodepoint()) |cp| {
+        units += if (cp > 0xFFFF) 2 else 1;
+    }
+    return units;
 }
 
 /// The inverse, for reading a string back out of Win32.
@@ -378,4 +580,21 @@ test "a buffer too small is rejected rather than truncated" {
     var wide: [2]u16 = undefined;
     // One code unit of room plus the terminator cannot hold this.
     try std.testing.expect(utf16(&wide, "hello") == null);
+}
+
+test "a rune outside the BMP needs two units, not one" {
+    // U+1F600 is four UTF-8 bytes and two UTF-16 units. A byte count would
+    // over-estimate the room needed; a codepoint count would under-estimate it
+    // by one and write past the end.
+    try std.testing.expectEqual(@as(?usize, 2), utf16Len("😀"));
+    try std.testing.expectEqual(@as(?usize, 4), utf16Len("a😀b"));
+
+    // Exactly enough room, including the terminator.
+    var exact: [3]u16 = undefined;
+    const w = utf16(&exact, "😀").?;
+    try std.testing.expectEqual(@as(usize, 2), std.mem.len(w));
+
+    // One unit short is refused rather than overflowing.
+    var short: [2]u16 = undefined;
+    try std.testing.expect(utf16(&short, "😀") == null);
 }
