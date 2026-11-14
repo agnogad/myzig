@@ -209,53 +209,116 @@ const ControllerVtbl = extern struct {
     get_CoreWebView2: *const fn (*anyopaque, *?*anyopaque) callconv(ffi.WINAPI) ffi.HRESULT,
 };
 
+/// `ICoreWebView2`'s vtable, in IDL order.
+///
+/// **The order is the interface.** A COM call is a slot index, so a method in
+/// the wrong position calls a different method with the wrong arguments — it
+/// does not fail, it does something unrelated. An earlier version of this
+/// struct omitted the seventeen methods between `ExecuteScript` and
+/// `OpenDevToolsWindow`, so `OpenDevToolsWindow` here actually reached
+/// `CapturePreview`, and `eval` was calling `ExecuteScript` correctly only by
+/// luck of position.
+///
+/// Anything not needed is `*const anyopaque` but **still occupies its slot**.
+/// `slotCount` asserts the total against the documented interface below, so a
+/// method added in the middle cannot silently shift the rest.
 const CoreWebView2Vtbl = extern struct {
+    // IUnknown
     QueryInterface: *const anyopaque,
     AddRef: *const anyopaque,
     Release: *const anyopaque,
-    get_Settings: *const anyopaque,
-    get_Source: *const anyopaque,
+    // ICoreWebView2
+    get_Settings: *const anyopaque, // 3
+    get_Source: *const anyopaque, // 4
     Navigate: *const fn (
         *anyopaque,
         [*:0]const u16,
         ?*anyopaque,
         ?*anyopaque,
         ?*anyopaque,
-    ) callconv(ffi.WINAPI) ffi.HRESULT,
-    NavigateToString: *const anyopaque,
-    add_NavigationStarting: *const anyopaque,
-    remove_NavigationStarting: *const anyopaque,
-    add_ContentLoading: *const anyopaque,
-    remove_ContentLoading: *const anyopaque,
-    add_SourceChanged: *const anyopaque,
-    remove_SourceChanged: *const anyopaque,
-    add_HistoryChanged: *const anyopaque,
-    remove_HistoryChanged: *const anyopaque,
-    add_NavigationCompleted: *const anyopaque,
-    remove_NavigationCompleted: *const anyopaque,
-    add_FrameNavigationStarting: *const anyopaque,
-    remove_FrameNavigationStarting: *const anyopaque,
-    add_FrameNavigationCompleted: *const anyopaque,
-    remove_FrameNavigationCompleted: *const anyopaque,
-    add_ScriptDialogOpening: *const anyopaque,
-    remove_ScriptDialogOpening: *const anyopaque,
-    add_PermissionRequested: *const anyopaque,
-    remove_PermissionRequested: *const anyopaque,
-    add_ProcessFailed: *const anyopaque,
-    remove_ProcessFailed: *const anyopaque,
+    ) callconv(ffi.WINAPI) ffi.HRESULT, // 5
+    NavigateToString: *const anyopaque, // 6
+    add_NavigationStarting: *const anyopaque, // 7
+    remove_NavigationStarting: *const anyopaque, // 8
+    add_ContentLoading: *const anyopaque, // 9
+    remove_ContentLoading: *const anyopaque, // 10
+    add_SourceChanged: *const anyopaque, // 11
+    remove_SourceChanged: *const anyopaque, // 12
+    add_HistoryChanged: *const anyopaque, // 13
+    remove_HistoryChanged: *const anyopaque, // 14
+    add_NavigationCompleted: *const anyopaque, // 15
+    remove_NavigationCompleted: *const anyopaque, // 16
+    add_FrameNavigationStarting: *const anyopaque, // 17
+    remove_FrameNavigationStarting: *const anyopaque, // 18
+    add_FrameNavigationCompleted: *const anyopaque, // 19
+    remove_FrameNavigationCompleted: *const anyopaque, // 20
+    add_ScriptDialogOpening: *const anyopaque, // 21
+    remove_ScriptDialogOpening: *const anyopaque, // 22
+    add_PermissionRequested: *const anyopaque, // 23
+    remove_PermissionRequested: *const anyopaque, // 24
+    add_ProcessFailed: *const anyopaque, // 25
+    remove_ProcessFailed: *const anyopaque, // 26
     AddScriptToExecuteOnDocumentCreated: *const fn (
         *anyopaque,
         [*:0]const u16,
         ?*anyopaque,
         ?*anyopaque,
-    ) callconv(ffi.WINAPI) ffi.HRESULT,
+    ) callconv(ffi.WINAPI) ffi.HRESULT, // 27
+    remove_ScriptToExecuteOnDocumentCreated: *const anyopaque, // 28
     ExecuteScript: *const fn (
         *anyopaque,
         [*:0]const u16,
         ?*anyopaque,
         ?*anyopaque,
-    ) callconv(ffi.WINAPI) ffi.HRESULT,
-    OpenDevToolsWindow: *const fn (*anyopaque) callconv(ffi.WINAPI) ffi.HRESULT,
+    ) callconv(ffi.WINAPI) ffi.HRESULT, // 29
+    // The seventeen methods an earlier version of this struct left out. They
+    // are unnamed here because nothing calls them, but their slots are what
+    // keep everything after them in the right place.
+    CapturePreview: *const anyopaque, // 30
+    Reload: *const anyopaque, // 31
+    PostWebMessageAsJson: *const anyopaque, // 32
+    PostWebMessageAsString: *const anyopaque, // 33
+    add_WebMessageReceived: *const anyopaque, // 34
+    remove_WebMessageReceived: *const anyopaque, // 35
+    CallDevToolsProtocolMethod: *const anyopaque, // 36
+    get_BrowserProcessId: *const anyopaque, // 37
+    get_CanGoBack: *const anyopaque, // 38
+    get_CanGoForward: *const anyopaque, // 39
+    GoBack: *const anyopaque, // 40
+    GoForward: *const anyopaque, // 41
+    GetDevToolsProtocolEventReceiver: *const anyopaque, // 42
+    Stop: *const anyopaque, // 43
+    add_NewWindowRequested: *const anyopaque, // 44
+    remove_NewWindowRequested: *const anyopaque, // 45
+    add_DocumentTitleChanged: *const anyopaque, // 46
+    remove_DocumentTitleChanged: *const anyopaque, // 47
+    get_DocumentTitle: *const anyopaque, // 48
+    AddHostObjectToScript: *const anyopaque, // 49
+    RemoveHostObjectFromScript: *const anyopaque, // 50
+    OpenDevToolsWindow: *const fn (*anyopaque) callconv(ffi.WINAPI) ffi.HRESULT, // 51
+    add_ContainsFullScreenElementChanged: *const anyopaque, // 52
+    remove_ContainsFullScreenElementChanged: *const anyopaque, // 53
+    get_ContainsFullScreenElement: *const anyopaque, // 54
+    add_WebResourceRequested: *const anyopaque, // 55
+    remove_WebResourceRequested: *const anyopaque, // 56
+    /// Registers which URLs `WebResourceRequested` fires for. Without a filter
+    /// the event never arrives, which is why this is needed for `myzig://`.
+    AddWebResourceRequestedFilter: *const anyopaque, // 57
+    RemoveWebResourceRequestedFilter: *const anyopaque, // 58
+    add_WindowCloseRequested: *const anyopaque, // 59
+    remove_WindowCloseRequested: *const anyopaque, // 60
+
+    /// The number of slots `ICoreWebView2` has up to `remove_WindowCloseRequested`.
+    pub const slot_count = 61;
+
+    comptime {
+        // A field added or removed anywhere above changes a slot index for
+        // everything after it, so the total is asserted rather than trusted.
+        if (@typeInfo(@This()).@"struct".field_names.len != slot_count) {
+            @compileError("CoreWebView2Vtbl out of step with ICoreWebView2: " ++
+                "every method must occupy its documented slot");
+        }
+    }
 };
 
 // ---------------------------------------------------------- COM handlers
