@@ -149,6 +149,10 @@ pub const WindowState = struct {
     height: i32 = 600,
     x: i32 = 0,
     y: i32 = 0,
+    /// True once the backend has reported a real position for this window.
+    /// Until then `x` and `y` are defaults and are not worth saving: writing
+    /// them would move the window to the screen corner on the next start.
+    window_placed: bool = false,
     scale: f32 = 1.0,
 
     visible: bool = true,

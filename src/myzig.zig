@@ -82,6 +82,9 @@ pub const log = @import("log.zig");
 pub const loop = @import("loop.zig");
 pub const paths = @import("utils/paths.zig");
 pub const env = @import("utils/env.zig");
+pub const instance = @import("utils/instance.zig");
+pub const update = @import("update.zig");
+pub const update_fetch = @import("update_fetch.zig");
 
 /// The Linux accessibility bridge, for tests and for backends that publish a
 /// tree. Empty on other platforms.

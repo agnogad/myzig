@@ -391,6 +391,35 @@ pub const ERROR_HOTKEY_ALREADY_REGISTERED: i32 = 1409;
 
 pub extern "kernel32" fn GetLastError() callconv(WINAPI) DWORD;
 
+// Named objects, for single-instance.
+//
+// A named mutex is the Windows equivalent of a `flock`: the name lives in the
+// kernel's object namespace, so a second process sees the same object and
+// fails to create it. Unlike a lock file there is no file to leave behind, and
+// unlike a pid the kernel destroys the object when the last handle closes —
+// including when the holder is killed.
+
+/// `ERROR_ALREADY_EXISTS`, the *only* way `CreateMutexW` says "another
+/// instance is running". A non-null handle alone does not mean that: creating a
+/// fresh mutex also succeeds and returns a handle.
+pub const ERROR_ALREADY_EXISTS: DWORD = 183;
+
+/// The longest name a kernel object can have, in UTF-16 units including the
+/// terminator. A longer name is truncated by Windows rather than refused, which
+/// would silently collide two applications' mutexes, so the caller must check.
+pub const MAX_PATH_UNITS: usize = 260;
+
+/// Creates or opens a mutex. Returns null on failure; whether the name already
+/// existed is *not* in the return value, it is `GetLastError()`, which the
+/// caller must read before any other Win32 call can overwrite it.
+pub extern "kernel32" fn CreateMutexW(
+    lpMutexAttributes: ?*anyopaque,
+    bInitialOwner: BOOL,
+    lpName: ?[*:0]const u16,
+) callconv(WINAPI) ?HANDLE;
+
+pub extern "kernel32" fn CloseHandle(hObject: HANDLE) callconv(WINAPI) BOOL;
+
 /// Virtual-key codes. These are ASCII for the letters and digits, which is the
 /// one place Win32 is kinder than Carbon, but the named keys are not.
 pub const VK_BACK: UINT = 0x08;

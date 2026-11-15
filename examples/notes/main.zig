@@ -493,6 +493,9 @@ pub fn main(init: std.process.Init) !void {
         // Closing the window leaves the tray icon, so the application keeps
         // running until Quit is chosen.
         .quit_on_last_window_closed = false,
+        // A notebook already open is what the user wants to see, not a second
+        // copy of it showing the same file.
+        .single_instance = true,
         .io = io,
     });
     defer app.deinit();
@@ -511,6 +514,8 @@ pub fn main(init: std.process.Init) !void {
         .title = "Notes",
         .width = 640,
         .height = 560,
+        // The window keeps its size and position between runs.
+        .state_key = "main",
         // A script asks the page to add one note on load through the same call
         // the form makes, so the whole path can be checked without a pointer.
         .url = selftestUrl(),

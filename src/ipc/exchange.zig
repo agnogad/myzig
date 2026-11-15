@@ -156,7 +156,12 @@ pub const Exchange = struct {
     }
 
     pub fn deinit(self: *Exchange) void {
+        // Both listener lists own their storage. `page_listeners` was freed here
+        // but `app_listeners` was not, so any application that called
+        // `App.listen` leaked at exit — visible only once something actually
+        // ran one and stopped.
         self.page_listeners.deinit(self.allocator);
+        self.app_listeners.deinit(self.allocator);
         var it = self.subscriptions.iterator();
         while (it.next()) |e| {
             for (e.value_ptr.items) |name| self.allocator.free(name);

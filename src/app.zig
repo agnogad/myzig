@@ -35,6 +35,7 @@ const log = @import("log.zig");
 const loop = @import("loop.zig");
 const alloc = @import("allocator.zig");
 const paths_mod = @import("utils/paths.zig");
+const instance_mod = @import("utils/instance.zig");
 const env = @import("utils/env.zig");
 const ipc_mod = @import("ipc/ipc.zig");
 const desktop_mod = @import("platform/desktop.zig");
@@ -167,6 +168,10 @@ pub const App = struct {
     /// crash inside a file call.
     io_handle: ?std.Io,
 
+    /// Held for the process' life when `AppOptions.single_instance` is asked
+    /// for and the lock was taken.
+    instance_lock: instance_mod.Lock = .{},
+
     const OwnedOptions = struct {
         name: []const u8,
         app_id: []const u8,
@@ -293,6 +298,9 @@ pub const App = struct {
     /// Destroys every window, the backend and all framework memory. Safe to
     /// call without `run`.
     pub fn deinit(self: *App) void {
+        // Released first: if anything below faults, the lock is already gone
+        // and the next launch is not blocked by a process that is going away.
+        self.instance_lock.deinit();
         if (self.phase == .running or self.phase == .stopping) {
             self.beQuit();
         }
@@ -301,6 +309,13 @@ pub const App = struct {
         while (i > 0) {
             i -= 1;
             if (self.windows[i]) |*state| {
+                // Windows still open at exit have their geometry remembered
+                // too. Saving only on a clean close meant a window closed by
+                // the window manager or by quitting never came back at the size
+                // the user left it.
+                if (state.state_key.len > 0) {
+                    self.saveWindowState(state);
+                }
                 self.beDestroyWindow(state.handle);
                 state.deinit();
                 self.windows[i] = null;
@@ -762,6 +777,18 @@ pub const App = struct {
             return error.AppStopped;
         }
         self.main_thread = std.Thread.getCurrentId();
+
+        // Single-instance is decided before the backend starts, so a second
+        // copy never opens a window it would have to take back. An application
+        // that cannot lock still runs: a missing lock file is a cosmetic
+        // problem, and refusing to start would turn it into a broken one.
+        if (self.options.single_instance) {
+            if (!self.takeInstanceLock()) {
+                self.phase = .stopped;
+                return error.AlreadyRunning;
+            }
+        }
+
         self.phase = .running;
 
         // The App moved when `init` returned it, so the backend's context
@@ -912,9 +939,11 @@ pub const App = struct {
                 state.height = saved.height;
                 if (saved.x) |x| {
                     state.x = x;
+                    state.window_placed = true;
                 }
                 if (saved.y) |y| {
                     state.y = y;
+                    state.window_placed = true;
                 }
                 if (saved.maximized) state.state = .maximized;
                 if (saved.fullscreen) state.state = .fullscreen;
@@ -1137,22 +1166,169 @@ pub const App = struct {
         fullscreen: bool = false,
     };
 
-    fn stateFilePath(self: *App, buf: []u8, key: []const u8) ?[]const u8 {
-        _ = key;
+    fn stateFilePath(self: *App, buf: []u8) ?[]const u8 {
         return std.fmt.bufPrint(buf, "{s}/window-state.json", .{self.paths.data}) catch null;
     }
 
+    /// Reads the whole state file. The returned value borrows from the parse
+    /// buffer, which is *not* freed here: `allocator` must be an arena that the
+    /// caller releases after the value is done with. Freeing the bytes first
+    /// would leave every field pointing at released memory — which parses fine
+    /// and reads as garbage, the kind of bug that shows up as a wrong window
+    /// size rather than a crash.
+    fn readStateDoc(self: *App, allocator: std.mem.Allocator) ?json.Value {
+        // Zig 0.17 routes file access through `std.Io`, and `AppOptions.io` is
+        // optional. An application that passed no handle cannot persist window
+        // state; it still runs, it just forgets its window size.
+        const file_io = self.io_handle orelse return null;
+
+        var path_buf: [paths_mod.max_path]u8 = undefined;
+        const path = self.stateFilePath(&path_buf) orelse return null;
+
+        const bytes = std.Io.Dir.cwd().readFileAlloc(file_io, path, allocator, .limited(1 << 20)) catch return null;
+
+        const parsed = json.parse(allocator, bytes) catch return null;
+        if (parsed.value != .object) return null;
+        return parsed.value;
+    }
+
     fn saveWindowState(self: *App, st: *const WindowState) void {
-        _ = self;
-        _ = st;
-        // Persisted in milestone 3 with the desktop APIs; the format is
-        // documented in docs/platforms.md.
+        // Closing a window must never fail because a file could not be
+        // written, so every error here is logged and swallowed.
+        self.saveWindowStateErr(st) catch |e| {
+            log.warn("window state not saved for '{s}': {s}", .{ st.state_key, @errorName(e) });
+        };
+    }
+
+    fn saveWindowStateErr(self: *App, st: *const WindowState) !void {
+        var arena_state = std.heap.ArenaAllocator.init(self.gpa);
+        defer arena_state.deinit();
+        const a = arena_state.allocator();
+
+        // Start from what is already on disk so other windows' keys survive a
+        // save. A missing or corrupt file starts a fresh document rather than
+        // failing, since the point of saving is to be the last writer.
+        const previous: []const json.Field = if (self.readStateDoc(a)) |doc| doc.object else &.{};
+
+        var entry: std.ArrayList(json.Field) = .empty;
+        try entry.append(a, .{ .key = "width", .value = .{ .number = try std.fmt.allocPrint(a, "{d}", .{st.width}) } });
+        try entry.append(a, .{ .key = "height", .value = .{ .number = try std.fmt.allocPrint(a, "{d}", .{st.height}) } });
+        // A window the backend has never placed has no meaningful origin, and
+        // storing the default (0, 0) would later jump it to the screen corner.
+        if (st.window_placed) {
+            try entry.append(a, .{ .key = "x", .value = .{ .number = try std.fmt.allocPrint(a, "{d}", .{st.x}) } });
+            try entry.append(a, .{ .key = "y", .value = .{ .number = try std.fmt.allocPrint(a, "{d}", .{st.y}) } });
+        }
+        try entry.append(a, .{ .key = "maximized", .value = .{ .bool = st.state == .maximized } });
+        try entry.append(a, .{ .key = "fullscreen", .value = .{ .bool = st.state == .fullscreen } });
+
+        var doc: std.ArrayList(json.Field) = .empty;
+        for (previous) |f| {
+            if (std.mem.eql(u8, f.key, st.state_key)) continue;
+            try doc.append(a, f);
+        }
+        try doc.append(a, .{ .key = st.state_key, .value = .{ .object = entry.items } });
+
+        const file_io = self.io_handle orelse return error.NoIoHandle;
+        try self.paths.ensureDirs(file_io);
+
+        var out: std.ArrayList(u8) = .empty;
+        try (json.Value{ .object = doc.items }).encode(a, &out);
+
+        var path_buf: [paths_mod.max_path]u8 = undefined;
+        const path = self.stateFilePath(&path_buf) orelse return error.PathTooLong;
+
+        // Write beside the target and rename, so an interrupted write leaves
+        // the previous file intact instead of a half-written one the next
+        // start would silently drop.
+        var tmp_buf: [paths_mod.max_path + 8]u8 = undefined;
+        const tmp = std.fmt.bufPrint(&tmp_buf, "{s}.tmp", .{path}) catch return error.PathTooLong;
+
+        const dir = std.Io.Dir.cwd();
+        try dir.writeFile(file_io, .{ .sub_path = tmp, .data = out.items });
+        try dir.rename(tmp, dir, path, file_io);
     }
 
     fn loadWindowState(self: *App, key: []const u8) ?SavedWindowState {
-        _ = self;
-        _ = key;
-        return null;
+        var arena_state = std.heap.ArenaAllocator.init(self.gpa);
+        defer arena_state.deinit();
+        const a = arena_state.allocator();
+
+        const doc = self.readStateDoc(a) orelse return null;
+        const entry = doc.get(key) orelse return null;
+        if (entry != .object) return null;
+
+        // A saved size must be usable. Zero or negative values are treated as
+        // corruption rather than passed to the backend, which would either
+        // clamp them or make an invisible window.
+        const width = (entry.get("width") orelse return null).asI64() orelse return null;
+        const height = (entry.get("height") orelse return null).asI64() orelse return null;
+        if (width <= 0 or height <= 0) return null;
+        if (width > std.math.maxInt(i32) or height > std.math.maxInt(i32)) return null;
+
+        var saved = SavedWindowState{
+            .width = @intCast(width),
+            .height = @intCast(height),
+            .maximized = if (entry.get("maximized")) |v| v.asBool() orelse false else false,
+            .fullscreen = if (entry.get("fullscreen")) |v| v.asBool() orelse false else false,
+        };
+
+        // Position is restored only as a pair: half a position is not a
+        // position, and defaulting the other axis would jump the window.
+        if (entry.get("x")) |xv| {
+            if (xv.asI64()) |x_int| {
+                if (entry.get("y")) |yv| {
+                    if (yv.asI64()) |y_int| {
+                        if (x_int >= std.math.minInt(i32) and x_int <= std.math.maxInt(i32) and
+                            y_int >= std.math.minInt(i32) and y_int <= std.math.maxInt(i32))
+                        {
+                            saved.x = @intCast(x_int);
+                            saved.y = @intCast(y_int);
+                        }
+                    }
+                }
+            }
+        }
+        return saved;
+    }
+
+    /// Takes the host-wide lock named after the application. Returns false
+    /// only when another live process holds it; every other failure is logged
+    /// and treated as "go ahead", because a lock that could not be written is
+    /// not a reason to refuse to start.
+    fn takeInstanceLock(self: *App) bool {
+        // The directory has to exist before the lock file can be created.
+        if (self.io_handle) |file_io| {
+            self.paths.ensureDirs(file_io) catch |e| {
+                log.warn("cannot create the data directory for the instance lock: {s}", .{@errorName(e)});
+            };
+        }
+
+        var name_buf: [128]u8 = undefined;
+        const file_name = instance_mod.lockFileName(&name_buf, self.options.name) orelse {
+            log.warn("single-instance: no usable lock name for '{s}', continuing unlocked", .{self.options.name});
+            return true;
+        };
+
+        var path_buf: [paths_mod.max_path + 1]u8 = undefined;
+        const raw = std.fmt.bufPrintSentinel(&path_buf, "{s}/{s}", .{ self.paths.data, file_name }, 0) catch {
+            log.warn("single-instance: lock path too long, continuing unlocked", .{});
+            return true;
+        };
+
+        switch (self.instance_lock.acquire(raw)) {
+            .primary => return true,
+            .secondary => {
+                log.info("{s} is already running", .{self.options.name});
+                return false;
+            },
+            .unavailable => {
+                // No platform implementation, or the file could not be made.
+                // Both are reported and then ignored.
+                log.warn("single-instance is not enforceable here; running anyway", .{});
+                return true;
+            },
+        }
     }
 
     // ----------------------------------------------------------- listeners
@@ -1294,6 +1470,7 @@ pub const App = struct {
         const st = self.windowState(.{ .id = id }) orelse return;
         st.x = x;
         st.y = y;
+        st.window_placed = true;
     }
     fn onWindowStateChanged(ctx: *anyopaque, id: u32, state: events.WindowState) void {
         const self = fromCtx(ctx);

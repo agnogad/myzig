@@ -77,9 +77,12 @@ pub const PathSet = struct {
     }
 
     /// Creates the directories if they do not exist. Returns the first error.
-    pub fn ensureDirs(self: *const PathSet) !void {
+    ///
+    /// Takes an `std.Io` because Zig 0.17 routes file access through it; an
+    /// application supplies the handle it was given at startup.
+    pub fn ensureDirs(self: *const PathSet, io: std.Io) !void {
         for ([_][]const u8{ self.config, self.data, self.cache, self.logs }) |dir| {
-            std.fs.cwd().makePath(dir) catch |e| switch (e) {
+            std.Io.Dir.cwd().createDirPath(io, dir) catch |e| switch (e) {
                 error.PathAlreadyExists => {},
                 else => return e,
             };
