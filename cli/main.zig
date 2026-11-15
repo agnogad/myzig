@@ -72,6 +72,11 @@ pub fn main(init: std.process.Init) !void {
         return;
     }
 
+    if (std.mem.eql(u8, command, "update-check")) {
+        try runUpdateCheck(ctx, &args);
+        return;
+    }
+
     var buf: [256]u8 = undefined;
     const text = try std.fmt.bufPrint(&buf, "myzig: unknown command '{s}'\n\n", .{command});
     try ctx.err(text);
@@ -695,6 +700,105 @@ const Ctx = struct {
     }
 };
 
+/// `myzig update-check` asks a feed whether a newer release exists.
+///
+/// It deliberately stops at the decision: it fetches and verifies, and prints
+/// what it found. It does **not** download the artifact or replace anything —
+/// replacing a running executable is the one step that cannot be undone, and
+/// doing it from a command whose safety has not been proven on a real
+/// installation would be a mistake.
+fn runUpdateCheck(ctx: Ctx, args: anytype) !void {
+    var feed: []const u8 = "";
+    var current: []const u8 = myzig.version;
+    var key_hex: []const u8 = "";
+
+    while (args.next()) |arg| {
+        if (std.mem.eql(u8, arg, "--feed")) {
+            feed = args.next() orelse {
+                try ctx.err("myzig update-check: --feed needs a URL\n");
+                std.process.exit(2);
+            };
+        } else if (std.mem.eql(u8, arg, "--current")) {
+            current = args.next() orelse {
+                try ctx.err("myzig update-check: --current needs a version\n");
+                std.process.exit(2);
+            };
+        } else if (std.mem.eql(u8, arg, "--key")) {
+            key_hex = args.next() orelse {
+                try ctx.err("myzig update-check: --key needs 64 hex characters\n");
+                std.process.exit(2);
+            };
+        } else {
+            var buf: [256]u8 = undefined;
+            try ctx.err(try std.fmt.bufPrint(&buf, "myzig update-check: unknown option '{s}'\n", .{arg}));
+            std.process.exit(2);
+        }
+    }
+
+    if (feed.len == 0) {
+        try ctx.err("myzig update-check: --feed URL is required\n");
+        std.process.exit(2);
+    }
+
+    const running = std.SemanticVersion.parse(current) catch {
+        var buf: [256]u8 = undefined;
+        try ctx.err(try std.fmt.bufPrint(&buf, "myzig update-check: '{s}' is not a version\n", .{current}));
+        std.process.exit(2);
+    };
+
+    // A key is required to *verify*. Without one the command reports a parse
+    // and a version comparison only, and says so, rather than implying the feed
+    // was authenticated.
+    var key: ?[32]u8 = null;
+    if (key_hex.len > 0) {
+        if (key_hex.len != 64) {
+            try ctx.err("myzig update-check: --key must be 64 hex characters (32 bytes)\n");
+            std.process.exit(2);
+        }
+        var bytes: [32]u8 = undefined;
+        _ = std.fmt.hexToBytes(&bytes, key_hex) catch {
+            try ctx.err("myzig update-check: --key is not hex\n");
+            std.process.exit(2);
+        };
+        key = bytes;
+    }
+
+    const client: myzig.update_fetch.Client = .{ .io = ctx.io, .gpa = ctx.gpa };
+
+    var buf: [512]u8 = undefined;
+    if (key) |k| {
+        const found = client.check(feed, running, k) catch |e| {
+            try ctx.err(try std.fmt.bufPrint(&buf, "myzig update-check: {s}\n", .{@errorName(e)}));
+            std.process.exit(1);
+        };
+        if (found) |r| {
+            defer r.deinit(ctx.gpa);
+            try ctx.out(try std.fmt.bufPrint(&buf, "update available: {d}.{d}.{d}\n  {s}\n", .{
+                r.version.major, r.version.minor, r.version.patch, r.url,
+            }));
+        } else {
+            try ctx.out(try std.fmt.bufPrint(&buf, "up to date ({s})\n", .{current}));
+        }
+    } else {
+        const r = client.fetchFeed(feed) catch |e| {
+            try ctx.err(try std.fmt.bufPrint(&buf, "myzig update-check: {s}\n", .{@errorName(e)}));
+            std.process.exit(1);
+        };
+        // The release is owned, so each field is freed individually.
+        defer ctx.gpa.free(r.url);
+        defer ctx.gpa.free(r.sha256);
+        defer ctx.gpa.free(r.signature);
+
+        if (myzig.update.isNewer(r.version, running)) {
+            try ctx.out(try std.fmt.bufPrint(&buf, "update available: {d}.{d}.{d}\n  {s}\n  (not verified: no --key given)\n", .{
+                r.version.major, r.version.minor, r.version.patch, r.url,
+            }));
+        } else {
+            try ctx.out(try std.fmt.bufPrint(&buf, "up to date ({s})\n  (not verified: no --key given)\n", .{current}));
+        }
+    }
+}
+
 const help_text =
     \\myzig — build web-based and native desktop apps in Zig
     \\
@@ -712,6 +816,12 @@ const help_text =
     \\    --version VERSION     Version string. 0.1.0 by default.
     \\    --out DIR             Where to write the bundle. dist/ by default.
     \\  doctor                  Report what this machine has and what is missing.
+    \\  update-check [options]  Ask an update feed whether a newer release exists.
+    \\    --feed URL            The feed to fetch (required).
+    \\    --current VERSION     The version running now. 0.1.0 by default.
+    \\    --key HEX             The publisher's ed25519 public key, 64 hex chars.
+    \\                          Without it the feed is only checked for shape.
+    \\                          Nothing is downloaded or installed.
     \\  version                 Print the version.
     \\  help                    Print this list.
     \\
