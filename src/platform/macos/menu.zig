@@ -170,10 +170,10 @@ fn makeItem(label: []const u8, accel: []const u8, enabled: bool) ?objc.ObjCId {
 fn keyEquivalent(a: menu_mod.Accelerator, buf: *[4]u8) []const u8 {
     // Letters and digits are contiguous runs in the enum, so one arithmetic
     // step selects the character; every other key is named.
-    const n = @intFromEnum(a.key);
-    const a_start = @intFromEnum(menu_mod.Accelerator.Key.a);
-    const digit_start = @intFromEnum(menu_mod.Accelerator.Key.digit_0);
-    const f_start = @intFromEnum(menu_mod.Accelerator.Key.f1);
+    const n = @backingInt(a.key);
+    const a_start = @backingInt(menu_mod.Accelerator.Key.a);
+    const digit_start = @backingInt(menu_mod.Accelerator.Key.digit_0);
+    const f_start = @backingInt(menu_mod.Accelerator.Key.f1);
     if (n >= a_start and n < a_start + letters.len) return letters[n - a_start];
     if (n >= digit_start and n < digit_start + digits.len) return digits[n - digit_start];
     return switch (a.key) {

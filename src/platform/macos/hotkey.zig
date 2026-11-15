@@ -12,7 +12,6 @@
 //! ## The mistake this module exists to prevent
 //!
 //! Carbon's modifier masks are **not** Cocoa's flags:
-
 //! | modifier | Carbon | Cocoa (`NSEventModifierFlag`) |
 //! |----------|--------|-------------------------------|
 //! | Cmd      | 1<<8   | 1<<20                         |

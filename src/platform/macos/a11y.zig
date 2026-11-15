@@ -475,7 +475,7 @@ test "every role maps to an AppKit role a reader knows" {
     const info = @typeInfo(a11y.Role).@"enum";
     inline for (info.field_values, 0..) |value, i| {
         _ = i;
-        const name = roleName(@enumFromInt(value));
+        const name = roleName(@fromBackingInt(@intCast(value)));
         try std.testing.expect(name.len > 2);
         try std.testing.expect(std.mem.startsWith(u8, name, "AX"));
     }
