@@ -19,7 +19,10 @@ here only once it compiles, has tests, and has been run.
 | 5 | Command line: `new`, `generate`, `doctor` | **Done** |
 | 6 | Windows backend: Win32 + WebView2 | **Written, compiles for Windows, not yet run** |
 | 7 | macOS backend: AppKit + WKWebView | **In progress** (windows, pages, menus, tray, monitors; compiles and links; never run) |
-| 8 | Ecosystem: plugins, packaging, auto-update | **In progress** (plugins and `myzig package` done; auto-update not started) |
+| 8 | Ecosystem: plugins, packaging, auto-update | **In progress** (plugins and `myzig package` done; update checking, fetching and verification done, self-replacement not written) |
+
+Window geometry persistence and single-instance enforcement are now
+implemented and tested; they were previously parsed-and-ignored options.
 
 ## What works today
 
@@ -176,8 +179,131 @@ env -u WAYLAND_DISPLAY DISPLAY=:99 GDK_BACKEND=x11 ./zig-out/bin/hello-webview
 * **WebKitGTK DMA-BUF**: the renderer is disabled by default
   (`WEBKIT_DISABLE_DMABUF_RENDERER=1`) because it draws blank pages on NVIDIA,
   in VMs and in containers. Set the variable yourself to opt back in.
-* **Single-instance** is parsed from options but not enforced yet.
-* **Window state persistence** (`state_key`) is read but not written back.
+* **Single-instance is enforced on Linux, macOS and Windows.** Windows uses a
+  named mutex; the other two use `flock`. Nothing is verified on Windows
+  because there is no Windows machine here, but the module builds for it.
+* **Single-instance requires `AppOptions.io`.** Zig 0.17 routes file access
+  through `std.Io`, so an application that passed no handle cannot create its
+  lock file and runs unlocked, with a warning.
+* **Window state persistence requires `AppOptions.io`** for the same reason, and
+  stores one `window-state.json` keyed by `state_key` in the data directory.
+  Position is only restored as a pair, and only once the backend has reported a
+  real position — otherwise a default `(0, 0)` would move the window to the
+  corner on the next start.
+
+## Window geometry and single instance
+
+Two options had been parsed and then ignored: `state_key`, whose save and load
+functions were empty stubs, and `single_instance`, which nothing read.
+
+**Geometry** is written to `<data>/window-state.json` as one object keyed by
+`state_key`, so several windows with different keys do not overwrite each other.
+A save reads the existing file first and replaces only its own key. The write
+goes to a temporary name and is renamed into place, so an interrupted write
+leaves the previous file intact rather than a half-written one that the next
+start would silently discard. A corrupt or unreadable file is treated as "no
+saved state" rather than an error: remembering a window is a convenience, and
+it must not stop an application from starting.
+
+Saving happens both when a window is destroyed and in `App.deinit` for windows
+still open, so quitting with the window up keeps its size.
+
+**Single instance** uses `flock(LOCK_EX | LOCK_NB)` on `<data>/<name>.lock`. The
+kernel releases a `flock` when the process exits, including when it is killed,
+so a crash cannot lock the application out permanently — which a pid file would
+get wrong the moment a pid is reused. The lock is taken in `run`, before the
+backend starts, so a second copy never opens a window it would have to take
+back.
+
+On Windows the same rule is carried by a named mutex, `Local\<name>.lock`. The
+trap there is that **a non-null handle does not mean "another instance"**: a
+brand-new mutex also returns a handle. Only `ERROR_ALREADY_EXISTS` read from
+`GetLastError` *immediately* after the call says the name was taken, and that
+`GetLastError` must be read before anything else can overwrite it. The name is
+prefixed `Local\` so two users on one machine each get their own instance, and
+an over-long name is refused rather than passed on, because Windows truncates
+object names instead of rejecting them and a truncated name would collide with
+another application's.
+
+The failure classification is the part worth reading: only `EAGAIN` means
+"another copy is running". Every other failure — an unwritable directory, a full
+file system — is reported as `unavailable` and the application **runs anyway**.
+Treating those as "already running" would make an application exit silently, with
+no window and no explanation, because of a permissions problem.
+
+### Two bugs the tests found
+
+1. **A use-after-free in the loader.** `readStateDoc` freed the parse buffer
+before returning, while `json.Value` borrows its slices. The parse succeeded and
+the fields pointed at released memory, so a saved 900-pixel window came back at
+its default 500. It is fixed by leaving the buffer in the caller's arena.
+2. **A leak in `Exchange.deinit`.** `app_listeners` was never freed, so any
+application that called `App.listen` leaked at exit. It only became visible once
+something ran a listener *and* stopped, which the single-instance path does.
+
+Verified by running: `notes` now opens at **777×555** when its state file says so,
+not at its requested 640×560; a second `notes` prints
+`Notes is already running` and exits before creating a window.
+
+## Update verification
+
+`src/update.zig` is the half of auto-update that can be proved on this machine:
+it parses a JSON feed, decides whether a version is newer, and verifies an
+ed25519 signature over the feed's `url` and `sha256`.
+
+Three decisions are the substance of it:
+
+* **The signature covers the URL and the digest together**, separated by a
+  newline. Covering only the bytes would let an attacker who captured a genuine
+  feed point it at a different artifact; covering them with no separator would
+  let `url "ab" + digest "cd"` and `url "abcd" + digest ""` sign identically.
+* **A downgrade is its own error.** A correctly signed *older* release is the
+  rollback attack, and a signature check alone passes it. `isNewer` refuses
+  equality too, so re-installing the running version cannot restart the
+  application for nothing.
+* **The digest is checked after the signature**, not before. A signature over a
+  digest that does not match the downloaded bytes verifies the wrong thing.
+
+Tested with a real key pair: a signature made over one URL must fail when the
+URL changes, when the digest changes, and when the key changes. Keys come from
+`generateDeterministic` with fixed seeds so a failure is reproducible.
+
+## Fetching, over real HTTP
+
+`src/update_fetch.zig` adds the network half and `myzig update-check` exposes it.
+The split exists so the test suite needs no network: `update.zig` is pure and
+`update_fetch.zig` is the only file that can fail because a socket did.
+
+Downloads are bounded (64 KiB for a feed, 512 MiB for an artifact) so a server
+that streams forever is stopped before it fills a disk.
+
+Verified against a local `python3 -m http.server`:
+
+| Sent | Result |
+| --- | --- |
+| a correctly signed feed | `update available: 2.0.0` |
+| the same feed with `url` edited after signing | `BadSigning`, exit 1 |
+| a wrong `--key` | `BadSigning`, exit 1 |
+| `{not json` | `BadFeed`, exit 1 |
+| a feed with no `signature` | `MissingField`, exit 1 |
+| a 404 | `BadStatus`, exit 1 |
+| an unreachable port | `FetchFailed`, exit 1 |
+| a feed older than `--current` | `up to date`, exit 0 |
+
+### A leak the live run found
+
+The first run of `update-check` leaked 312 bytes every time. `json.parse` returns
+the parser alongside the value, and the parser owns the arena the fields live in;
+`update.parse` dropped it. Two consequences were worth writing down:
+
+* The leak is invisible in a program that exits, which is why it took running the
+  command rather than a unit test to see it.
+* The fix is a `defer`, and a `defer` there is only safe because `parseOwned`
+  copies every field before `parse` returns — otherwise the same change would
+  have turned a leak into a use-after-free.
+
+**Nothing installs anything.** The command stops at the decision, and there is no
+code on the path that replaces program files.
 
 ## The macOS backend, second pass
 
@@ -551,6 +677,15 @@ Nothing here has been seen working, and `docs/platforms.md` says so.
 
 ## Next
 
-1. Milestone 2: `App.bind` a service, route calls by window, reply with
-   typed JSON, emit events, and generate the TypeScript client from the service
-   definitions so the two sides cannot drift.
+1. **Auto-update** (Milestone 8): feed format, version comparison, ed25519
+   signature check, artifact digest, HTTP fetching and `myzig update-check` are
+   written and tested. What is missing is the swap-and-restart, which needs a
+   real installation to test. See `docs/packaging.md`.
+2. **Single-instance on Windows** is now written; what remains is running it on
+   a Windows machine, which this project has never had.
+3. **Unicode text in the native UI toolkit** (Milestone 4): the bitmap font
+   covers ASCII 32–126 only, so a native window cannot draw more than Latin-1.
+4. **Run the Windows and macOS backends.** Both compile and link; neither has
+   ever been started on its own host. Until someone runs `notes` on a Windows
+   machine and on a Mac, every claim about those backends is a claim about code
+   that type-checks.

@@ -25,12 +25,13 @@ WebKitGTK 4.1 for pages; cairo for the native surface; X11 for global shortcuts.
 | Notifications | verified | `notify-send` fallback under Xvfb |
 | Menu bar | verified | GtkMenuBar |
 | Tray icon | **not shown** | needs a status area; reported honestly as false when absent |
-| Global shortcuts | verified | X11 key grab |
+| Global shortcuts | verified | X11 key grab; Wayland refuses them with `NotSupported`, by design |
 | Native UI surface | verified | GTK drawing area, software rasteriser |
 | Native UI input | verified | mouse press and release |
 | Accessibility | verified | AT-SPI over D-Bus: a reader walks the tree |
 | Wayland session | verified | a whole window, drawn and legible, captured with `grim` |
-| Global shortcuts | X11 only | Wayland refuses them with `NotSupported`, by design |
+| Window geometry persistence | verified | `window-state.json`; a saved 777×555 window opened at 777×555 |
+| Single instance | verified | `flock`; a second copy logs `already running` and exits |
 
 Libraries are loaded with `std.DynLib` at the moment a feature needs them:
 
@@ -82,6 +83,8 @@ section says so rather than claiming otherwise.
 | Global shortcuts | written, unrun | `RegisterHotKey`, delivered as `WM_HOTKEY` to the message loop |
 | Native UI surface | written, unrun | off-screen DIB + `BitBlt`, software rasteriser |
 | Desktop APIs | written, unrun | clipboard, file dialogs, message boxes; notifications go to a tray balloon; reveal-in-folder answers `false` |
+| Window geometry persistence | written, unrun | shares `utils/instance.zig` and the app's `window-state.json` |
+| Single instance | written, unrun | a named mutex, `Local\<name>.lock` |
 
 `WebView2Loader.dll` is opened at runtime, so an application that never opens a
 page never needs it. `bcryptprimitives.dll` is linked, because it is the only
@@ -127,7 +130,10 @@ pointers (`delegate.zig`), so the backend still compiles no Objective-C.
 | page load finished / failed events | written: a navigation delegate |
 | monitors, system theme | written: `NSScreen`, `effectiveAppearance` |
 | calling from another thread | written: `dispatch_async_f` to the main queue |
-| global shortcuts, desktop APIs | **not written** |
+| global shortcuts | written: Carbon `RegisterEventHotKey`, which needs no permission |
+| desktop APIs | written: clipboard, dialogs, opening files; `notify` returns `false` |
+| window geometry persistence | written: the same `window-state.json` as Linux |
+| single instance | written: `flock`, as on Linux |
 | `myzig://` scheme | **not written** — a page is loaded from a URL the system can reach |
 
 Global shortcuts are written, through Carbon's `RegisterEventHotKey` rather

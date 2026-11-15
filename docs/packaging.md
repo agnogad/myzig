@@ -94,8 +94,9 @@ These are honest gaps, not oversights:
   does not have yet.
 * **`.app` bundle and code signing.** macOS only, and the macOS backend is not
   written.
-* **Auto-update.** Needs a feed format, a signature key and a download path.
-  Not started, and not promised in the public API.
+* **Auto-update.** Checking and fetching exist (`src/update.zig`,
+  `src/update_fetch.zig`, `myzig update-check`); replacing the running
+  installation does not. See below for exactly where the line is drawn.
 
 Until then, the staged directory plus a tarball of it is what `myzig package`
 gives you, and it is enough to hand a working program to someone else.
